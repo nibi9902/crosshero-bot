@@ -289,11 +289,15 @@ let classesByDate = {};        // { 'YYYY-MM-DD': [items] }
 let selected = new Set();      // claus únics per item seleccionat
 
 function $(id) { return document.getElementById(id); }
+function pad(n) { return String(n).padStart(2, '0'); }
+function dateISO(d) {
+  // Local date → YYYY-MM-DD (no UTC conversion)
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
 function todayISO() {
   const d = new Date(); d.setHours(0,0,0,0);
-  return d.toISOString().slice(0,10);
+  return dateISO(d);
 }
-function dateISO(d) { return d.toISOString().slice(0,10); }
 function parseISO(s) { return new Date(s + 'T00:00:00'); }
 function weekStart(offset = 0) {
   // Dilluns d'aquesta setmana + offset setmanes
