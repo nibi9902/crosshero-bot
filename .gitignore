@@ -6,3 +6,4 @@ venv/
 storage_state.json
 .env
 .DS_Store
+scratch/
