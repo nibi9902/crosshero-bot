@@ -1,0 +1,200 @@
+"""
+API FastAPI del bot de reserves Crosshero.
+
+Endpoints:
+  GET  /health
+  GET  /classes?program=Hyrox&date=YYYY-MM-DD
+  POST /schedule  → programa una o més reserves
+  GET  /pending   → llista reserves programades
+  DELETE /pending/{job_id}
+  GET  /programs  → llista programes coneguts
+"""
+from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from typing import Optional
+from zoneinfo import ZoneInfo
+
+from fastapi import FastAPI, HTTPException, Header, Depends
+from pydantic import BaseModel, Field
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.triggers.date import DateTrigger
+
+from .crosshero import CrossheroClient, PROGRAMS
+from . import config
+
+
+scheduler = BackgroundScheduler(
+    jobstores={"default": SQLAlchemyJobStore(url=f"sqlite:///{config.JOBS_DB}")},
+    timezone=config.TIMEZONE,
+)
+
+
+def reserve_job(class_id: str, label: str):
+    """Funció que executa APScheduler a l'hora exacta."""
+    client = CrossheroClient(config.STORAGE_STATE)
+    try:
+        result = client.reserve_class(class_id)
+        print(f"[reserve_job] {label} → {result}", flush=True)
+        return result
+    finally:
+        client.close()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler.start()
+    yield
+    scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="Crosshero Bot", lifespan=lifespan)
+
+
+def require_api_key(x_api_key: Optional[str] = Header(default=None)):
+    if config.API_KEY and x_api_key != config.API_KEY:
+        raise HTTPException(401, "Invalid API key")
+
+
+# ---------- Schemas ----------
+
+class ScheduleItem(BaseModel):
+    program: str = Field(..., examples=["Hyrox"])
+    class_date: date = Field(..., alias="date", description="Data de la classe (YYYY-MM-DD)")
+    class_time: str = Field(..., alias="time", examples=["19:00"], description="Hora HH:MM")
+
+    model_config = {"populate_by_name": True}
+
+
+class ScheduleRequest(BaseModel):
+    items: list[ScheduleItem]
+
+
+class ScheduledJobOut(BaseModel):
+    id: str
+    program: str
+    class_date: str
+    class_time: str
+    fires_at: str
+    next_run: Optional[str] = None
+
+
+# ---------- Endpoints ----------
+
+@app.get("/health")
+def health():
+    return {"ok": True, "scheduler_running": scheduler.running}
+
+
+@app.get("/programs")
+def list_programs():
+    return {"programs": list(PROGRAMS.keys())}
+
+
+@app.get("/classes")
+def list_classes(program: str, date: str, _: None = Depends(require_api_key)):
+    """date format: YYYY-MM-DD"""
+    try:
+        d = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Format data invàlid (YYYY-MM-DD)")
+    client = CrossheroClient(config.STORAGE_STATE)
+    try:
+        return client.list_classes(program, d)
+    finally:
+        client.close()
+
+
+@app.post("/schedule")
+def schedule(req: ScheduleRequest, _: None = Depends(require_api_key)):
+    """
+    Per cada item:
+      - resol class_id consultant Crosshero pel dia/hora
+      - calcula moment d'obertura: classe - RESERVATION_LEAD_DAYS, mateixa hora
+      - programa job al scheduler que s'executarà aleshores
+    """
+    tz = ZoneInfo(config.TIMEZONE)
+    client = CrossheroClient(config.STORAGE_STATE)
+    scheduled, errors = [], []
+
+    try:
+        for item in req.items:
+            # 1) trobar la classe
+            lst = client.list_classes(item.program, item.class_date)
+            if not lst.get("ok"):
+                errors.append({"item": item.model_dump(mode="json"), "error": lst.get("error")})
+                continue
+
+            match = next((c for c in lst["classes"] if c["hora"] == item.class_time), None)
+            if not match:
+                errors.append({
+                    "item": item.model_dump(mode="json"),
+                    "error": f"No hi ha classe {item.program} a les {item.class_time} el {item.class_date}",
+                    "available": [c["hora"] for c in lst["classes"]],
+                })
+                continue
+
+            class_id = match["id"]
+
+            # 2) calcular moment d'obertura
+            h, m = map(int, item.class_time.split(":"))
+            class_dt = datetime.combine(item.class_date, datetime.min.time()).replace(
+                hour=h, minute=m, tzinfo=tz
+            )
+            fire_at = class_dt - timedelta(days=config.RESERVATION_LEAD_DAYS) \
+                              - timedelta(seconds=config.FIRE_OFFSET_SECONDS)
+
+            now = datetime.now(tz)
+            if fire_at <= now:
+                # Reserva ja oberta — la disparem immediatament
+                fire_at = now + timedelta(seconds=2)
+
+            # 3) programar job
+            job_id = f"{item.program}-{item.class_date}-{item.class_time}-{class_id[:6]}"
+            label = f"{item.program} {item.class_date} {item.class_time}"
+
+            job = scheduler.add_job(
+                reserve_job,
+                trigger=DateTrigger(run_date=fire_at),
+                args=[class_id, label],
+                id=job_id,
+                replace_existing=True,
+                misfire_grace_time=300,
+            )
+
+            scheduled.append({
+                "job_id": job.id,
+                "program": item.program,
+                "class_date": str(item.class_date),
+                "class_time": item.class_time,
+                "class_id": class_id,
+                "fires_at": fire_at.isoformat(),
+            })
+    finally:
+        client.close()
+
+    return {"scheduled": scheduled, "errors": errors}
+
+
+@app.get("/pending")
+def pending(_: None = Depends(require_api_key)):
+    out = []
+    for j in scheduler.get_jobs():
+        parts = j.id.split("-")
+        out.append({
+            "id": j.id,
+            "next_run": j.next_run_time.isoformat() if j.next_run_time else None,
+            "args": j.args,
+        })
+    return {"jobs": out}
+
+
+@app.delete("/pending/{job_id}")
+def delete_pending(job_id: str, _: None = Depends(require_api_key)):
+    try:
+        scheduler.remove_job(job_id)
+        return {"ok": True, "removed": job_id}
+    except Exception as e:
+        raise HTTPException(404, f"Job no trobat: {e}")

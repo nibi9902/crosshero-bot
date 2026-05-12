@@ -1,0 +1,14 @@
+data/
+*.pyc
+__pycache__/
+.git/
+.gitignore
+.venv/
+venv/
+*.md
+inspect*.py
+reserve.py
+capture_session.py
+list_classes.py
+storage_state.json
+.DS_Store
