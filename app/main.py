@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from pydantic import BaseModel, Field
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -85,7 +85,30 @@ class ScheduledJobOut(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "scheduler_running": scheduler.running}
+    has_session = config.STORAGE_STATE.exists()
+    return {
+        "ok": True,
+        "scheduler_running": scheduler.running,
+        "has_session": has_session,
+    }
+
+
+@app.post("/session")
+async def upload_session(request: Request, _: None = Depends(require_api_key)):
+    """
+    Puja un nou storage_state.json al volum (per inicialitzar o refrescar la sessió).
+    Body: JSON tal qual de Playwright storage_state.
+    """
+    import json as _json
+    body = await request.body()
+    try:
+        data = _json.loads(body)
+        if not isinstance(data, dict) or "cookies" not in data:
+            raise ValueError("Falta 'cookies' al JSON")
+    except Exception as e:
+        raise HTTPException(400, f"JSON invàlid: {e}")
+    config.STORAGE_STATE.write_bytes(body)
+    return {"ok": True, "bytes": len(body), "cookies": len(data.get("cookies", []))}
 
 
 @app.get("/programs")
