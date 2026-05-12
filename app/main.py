@@ -11,11 +11,12 @@ Endpoints:
 """
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
-from pathlib import Path
+from pathlib import Path  # noqa
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -82,6 +83,19 @@ class ScheduledJobOut(BaseModel):
 
 
 # ---------- Endpoints ----------
+
+UI_HTML = (Path(__file__).parent / "ui.html").read_text(encoding="utf-8")
+
+
+@app.get("/", response_class=HTMLResponse)
+def root():
+    return UI_HTML
+
+
+@app.get("/ui", response_class=HTMLResponse)
+def ui():
+    return UI_HTML
+
 
 @app.get("/health")
 def health():
