@@ -116,6 +116,60 @@ def list_programs():
     return {"programs": list(PROGRAMS.keys())}
 
 
+DAYS_CA = ["Dl", "Dm", "Dc", "Dj", "Dv", "Ds", "Dg"]
+
+
+@app.get("/upcoming")
+def list_upcoming(
+    program: str = "Hyrox",
+    days: int = 10,
+    skip_booked: bool = True,
+    _: None = Depends(require_api_key),
+):
+    """
+    Retorna totes les classes d'un programa dels propers `days` dies.
+    Cada classe inclou label llegible per l'Atajo iPhone (selector múltiple).
+
+    Si skip_booked=True (per defecte), omet les que ja tens reservades o programades.
+    """
+    tz = ZoneInfo(config.TIMEZONE)
+    today = datetime.now(tz).date()
+
+    # IDs ja a la cua del scheduler
+    scheduled_ids = set()
+    for j in scheduler.get_jobs():
+        if j.args and len(j.args) >= 1:
+            scheduled_ids.add(j.args[0])
+
+    client = CrossheroClient(config.STORAGE_STATE)
+    all_items = []
+    try:
+        for offset in range(days):
+            d = today + timedelta(days=offset)
+            res = client.list_classes(program, d)
+            if not res.get("ok"):
+                continue
+            for c in res["classes"]:
+                # label estil "Dl 18/05 07:00"
+                weekday = DAYS_CA[d.weekday()]
+                label = f"{weekday} {d.strftime('%d/%m')} {c['hora']}"
+                item = {
+                    "label": label,
+                    "program": program,
+                    "date": d.isoformat(),
+                    "time": c["hora"],
+                    "class_id": c["id"],
+                    "already_scheduled": c["id"] in scheduled_ids,
+                }
+                if skip_booked and item["already_scheduled"]:
+                    continue
+                all_items.append(item)
+    finally:
+        client.close()
+
+    return {"ok": True, "program": program, "count": len(all_items), "items": all_items}
+
+
 @app.get("/classes")
 def list_classes(program: str, date: str, _: None = Depends(require_api_key)):
     """date format: YYYY-MM-DD"""
