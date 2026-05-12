@@ -2,274 +2,440 @@
 <html lang="ca">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Crosshero · Reservar</title>
+<meta name="theme-color" content="#0a0a0a">
+<title>Crosshero</title>
 <style>
   :root {
     --bg: #0a0a0a;
-    --card: #161616;
+    --bg-elevated: #161616;
+    --card: #1c1c1e;
     --border: #2a2a2a;
-    --text: #ededed;
-    --muted: #8a8a8a;
+    --text: #f5f5f7;
+    --muted: #8e8e93;
+    --muted-2: #545458;
     --accent: #ff6b35;
-    --accent-dark: #d4521f;
-    --success: #4ade80;
-    --error: #f87171;
+    --accent-soft: rgba(255,107,53,.14);
+    --success: #30d158;
+    --error: #ff453a;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
   body {
-    margin: 0; padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
     background: var(--bg); color: var(--text);
-    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro", system-ui, sans-serif;
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
     min-height: 100vh;
+    padding-bottom: 120px;
+    overscroll-behavior-y: contain;
   }
+  /* ─── Header ─── */
   header {
-    padding: 18px 0 12px; position: sticky; top: 0; background: var(--bg);
-    border-bottom: 1px solid var(--border); z-index: 10;
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(10,10,10,.85);
+    backdrop-filter: saturate(180%) blur(18px);
+    -webkit-backdrop-filter: saturate(180%) blur(18px);
+    border-bottom: 0.5px solid var(--border);
+    padding: env(safe-area-inset-top) 16px 8px;
   }
-  h1 { font-size: 22px; margin: 0; font-weight: 700; letter-spacing: -0.02em; }
-  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
-  .controls { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }
-  .controls select, .controls input {
-    background: var(--card); color: var(--text); border: 1px solid var(--border);
-    padding: 8px 12px; border-radius: 10px; font: inherit; font-size: 14px;
+  .header-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0 4px;
   }
-  .day-group { margin: 16px 0; }
-  .day-label {
-    font-size: 12px; font-weight: 600; text-transform: uppercase;
-    color: var(--muted); letter-spacing: 0.08em; padding: 0 4px 6px;
+  h1 { font-size: 28px; margin: 0; font-weight: 700; letter-spacing: -0.02em; }
+  .program-pill {
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    color: var(--text); padding: 6px 12px; border-radius: 14px;
+    font-size: 13px; font-weight: 500;
+    appearance: none; -webkit-appearance: none;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%238e8e93' d='M5 6 0 0h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center;
   }
-  .class-item {
-    display: flex; align-items: center; gap: 12px;
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 12px; padding: 14px 16px; margin-bottom: 8px;
-    cursor: pointer; user-select: none; transition: all 0.15s;
+  .month-title {
+    font-size: 13px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 4px 0;
   }
-  .class-item.selected {
-    border-color: var(--accent); background: rgba(255, 107, 53, 0.08);
+
+  /* ─── Week strip ─── */
+  .week {
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    gap: 4px; padding: 8px 0 12px;
   }
-  .class-item.scheduled { opacity: 0.5; }
-  .check {
-    width: 22px; height: 22px; border-radius: 6px;
-    border: 2px solid var(--border); flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
+  .day {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 6px 0 8px; border-radius: 12px;
+    cursor: pointer; user-select: none;
+    transition: background 0.15s;
+    position: relative;
+  }
+  .day.active { background: var(--accent); }
+  .day.today .num { color: var(--accent); }
+  .day.active .num, .day.active .wd { color: #fff; }
+  .day.past { opacity: 0.35; pointer-events: none; }
+  .wd {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 4px;
+  }
+  .num { font-size: 17px; font-weight: 600; }
+  .dot {
+    position: absolute; bottom: 2px;
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--accent);
+  }
+  .day.active .dot { background: #fff; }
+  .day.no-classes .dot { display: none; }
+
+  .week-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 4px;
+  }
+  .nav-btn {
+    background: none; border: 0; color: var(--accent);
+    padding: 8px; font-size: 15px; cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+    font-weight: 500;
+  }
+  .nav-btn:disabled { color: var(--muted-2); cursor: not-allowed; }
+
+  /* ─── Day detail ─── */
+  main { padding: 12px 16px 0; }
+  .day-heading {
+    font-size: 22px; font-weight: 700; padding: 8px 0 12px;
+    letter-spacing: -0.02em;
+  }
+  .day-heading .muted { color: var(--muted); font-weight: 500; }
+
+  .class-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
+  }
+  .class-tile {
+    background: var(--card); border: 1.5px solid transparent;
+    border-radius: 14px; padding: 16px 14px;
+    cursor: pointer; user-select: none;
     transition: all 0.15s;
+    display: flex; flex-direction: column;
+    position: relative; overflow: hidden;
+    min-height: 88px;
   }
-  .selected .check {
-    background: var(--accent); border-color: var(--accent);
+  .class-tile:active { transform: scale(0.97); }
+  .class-tile.selected {
+    background: var(--accent-soft); border-color: var(--accent);
   }
-  .check svg { display: none; }
-  .selected .check svg { display: block; }
-  .info { flex: 1; }
-  .info .time { font-weight: 600; font-size: 17px; }
-  .info .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
-  .badge {
-    font-size: 11px; padding: 2px 8px; border-radius: 6px;
-    background: var(--border); color: var(--muted);
+  .class-tile.scheduled {
+    background: var(--bg-elevated); opacity: 0.55;
+    cursor: not-allowed;
   }
+  .class-tile.scheduled::after {
+    content: "Programada"; position: absolute; top: 6px; right: 8px;
+    font-size: 9px; font-weight: 600; color: var(--success);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .tile-time {
+    font-size: 22px; font-weight: 700; letter-spacing: -0.01em;
+  }
+  .tile-program {
+    font-size: 12px; color: var(--muted); margin-top: 4px;
+  }
+  .tile-check {
+    position: absolute; top: 10px; right: 10px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); display: none;
+    align-items: center; justify-content: center;
+  }
+  .selected .tile-check { display: flex; }
+  .scheduled .tile-check { display: none !important; }
+
+  .empty {
+    text-align: center; padding: 60px 24px; color: var(--muted);
+    font-size: 14px;
+  }
+  .empty .big { font-size: 36px; margin-bottom: 8px; opacity: 0.4; }
+
+  /* ─── Footer fixed ─── */
   footer {
-    position: sticky; bottom: 0; background: linear-gradient(to top, var(--bg) 70%, transparent);
-    padding: 16px 0 max(16px, env(safe-area-inset-bottom));
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 12px 16px max(16px, env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--bg) 60%, transparent);
+    z-index: 30;
   }
-  button.primary {
-    width: 100%; padding: 16px; font-size: 16px; font-weight: 600;
+  .submit-bar {
+    display: flex; gap: 10px; align-items: center;
+  }
+  .selected-pill {
+    background: var(--bg-elevated); border: 1px solid var(--border);
+    color: var(--muted); padding: 8px 14px; border-radius: 12px;
+    font-size: 13px; font-weight: 500; white-space: nowrap;
+  }
+  .submit {
+    flex: 1; padding: 14px; font-size: 16px; font-weight: 600;
     background: var(--accent); color: #fff; border: 0; border-radius: 12px;
     cursor: pointer; transition: all 0.15s;
   }
-  button.primary:active { background: var(--accent-dark); transform: scale(0.98); }
-  button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
-  .status {
-    margin: 12px 0; padding: 12px 16px; border-radius: 10px;
-    font-size: 14px; display: none;
+  .submit:active { transform: scale(0.98); background: #d4521f; }
+  .submit:disabled {
+    background: var(--bg-elevated); color: var(--muted); cursor: not-allowed;
   }
-  .status.show { display: block; }
-  .status.success { background: rgba(74, 222, 128, 0.1); color: var(--success); border: 1px solid rgba(74, 222, 128, 0.3); }
-  .status.error { background: rgba(248, 113, 113, 0.1); color: var(--error); border: 1px solid rgba(248, 113, 113, 0.3); }
-  .loading { text-align: center; padding: 40px 0; color: var(--muted); }
-  .empty { text-align: center; padding: 40px 16px; color: var(--muted); }
-  .api-key-prompt {
-    background: var(--card); padding: 20px; border-radius: 12px; margin: 24px 0;
-    border: 1px solid var(--border);
+
+  /* ─── Toast ─── */
+  .toast {
+    position: fixed; bottom: 90px; left: 50%; transform: translate(-50%, 20px);
+    background: var(--bg-elevated); color: var(--text);
+    padding: 12px 18px; border-radius: 12px; border: 1px solid var(--border);
+    font-size: 14px; max-width: 90%; opacity: 0;
+    transition: all 0.25s ease;
+    pointer-events: none; z-index: 40;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
   }
-  .api-key-prompt input {
-    width: 100%; padding: 12px; margin: 8px 0; font-family: ui-monospace, monospace;
-    font-size: 13px;
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.success { border-color: var(--success); color: var(--success); }
+  .toast.error { border-color: var(--error); color: var(--error); }
+
+  /* ─── Key prompt ─── */
+  .key-prompt {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(20px); display: none;
+    align-items: center; justify-content: center; padding: 24px;
+    z-index: 50;
+  }
+  .key-prompt.show { display: flex; }
+  .key-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px; width: 100%; max-width: 380px;
+  }
+  .key-card h3 { margin: 0 0 12px; font-size: 18px; }
+  .key-card p { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+  .key-card input {
+    width: 100%; padding: 12px 14px; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text); font: 13px ui-monospace, monospace;
+    margin-bottom: 12px;
+  }
+
+  /* ─── Loading ─── */
+  .skeleton {
+    background: linear-gradient(90deg, var(--card) 0%, var(--bg-elevated) 50%, var(--card) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 14px;
+    min-height: 88px;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Crosshero · Reservar</h1>
-  <div class="sub" id="subtitle">Carregant classes...</div>
-  <div class="controls">
-    <select id="program">
+  <div class="header-row">
+    <h1 id="day-heading">Crosshero</h1>
+    <select id="program" class="program-pill">
       <option value="Hyrox" selected>Hyrox</option>
       <option value="CrossFit">CrossFit</option>
       <option value="Strength">Strength</option>
       <option value="Full body">Full body</option>
       <option value="Ioga">Ioga</option>
+      <option value="ESQUENA SANA">Esquena Sana</option>
     </select>
-    <select id="days">
-      <option value="7">Propers 7 dies</option>
-      <option value="10" selected>Propers 10 dies</option>
-      <option value="14">Properes 2 setmanes</option>
-    </select>
+  </div>
+  <div class="month-title" id="month-title">Carregant...</div>
+  <div class="week" id="week"></div>
+  <div class="week-nav">
+    <button class="nav-btn" id="prev-week">‹ Anterior</button>
+    <button class="nav-btn" id="today-btn">Avui</button>
+    <button class="nav-btn" id="next-week">Següent ›</button>
   </div>
 </header>
 
-<div id="key-prompt" class="api-key-prompt" style="display:none;">
-  <strong>Primera vegada?</strong><br>
-  Enganxa la teva API_KEY (es guardarà al telèfon):
-  <input type="password" id="key-input" placeholder="API key">
-  <button class="primary" onclick="saveKey()">Guardar</button>
-</div>
-
-<main id="list">
-  <div class="loading">Carregant…</div>
+<main>
+  <div id="day-content"></div>
 </main>
 
-<div class="status" id="status"></div>
-
 <footer>
-  <button class="primary" id="submit" disabled>Reservar (0)</button>
+  <div class="submit-bar">
+    <div class="selected-pill" id="selected-pill">0 seleccionades</div>
+    <button class="submit" id="submit" disabled>Reservar</button>
+  </div>
 </footer>
+
+<div id="toast" class="toast"></div>
+
+<div id="key-prompt" class="key-prompt">
+  <div class="key-card">
+    <h3>API Key</h3>
+    <p>Enganxa la clau d'accés. Es guardarà només en aquest dispositiu.</p>
+    <input type="password" id="key-input" placeholder="API key" autocomplete="off">
+    <button class="submit" onclick="saveKey()">Guardar</button>
+  </div>
+</div>
 
 <script>
 const API_BASE = window.location.origin;
 const KEY_STORAGE = 'crosshero_api_key';
+const DAYS_CA = ['Dg', 'Dl', 'Dm', 'Dc', 'Dj', 'Dv', 'Ds']; // Date.getDay(): 0=Dg
+const DAYS_LONG = ['Diumenge', 'Dilluns', 'Dimarts', 'Dimecres', 'Dijous', 'Divendres', 'Dissabte'];
+const MONTHS_CA = ['Gen','Feb','Mar','Abr','Mai','Jun','Jul','Ago','Set','Oct','Nov','Des'];
+const MONTHS_LONG = ['Gener','Febrer','Març','Abril','Maig','Juny','Juliol','Agost','Setembre','Octubre','Novembre','Desembre'];
 
 let apiKey = localStorage.getItem(KEY_STORAGE) || '';
-let allItems = [];
-let selected = new Set();
+let weekOffset = 0;            // setmanes des de la setmana actual
+let selectedDate = todayISO(); // dia seleccionat al calendari
+let classesByDate = {};        // { 'YYYY-MM-DD': [items] }
+let selected = new Set();      // claus únics per item seleccionat
 
 function $(id) { return document.getElementById(id); }
-
-function setStatus(msg, kind) {
-  const s = $('status');
-  s.textContent = msg;
-  s.className = 'status show ' + (kind || '');
-  if (kind === 'success') setTimeout(() => s.classList.remove('show'), 5000);
+function todayISO() {
+  const d = new Date(); d.setHours(0,0,0,0);
+  return d.toISOString().slice(0,10);
+}
+function dateISO(d) { return d.toISOString().slice(0,10); }
+function parseISO(s) { return new Date(s + 'T00:00:00'); }
+function weekStart(offset = 0) {
+  // Dilluns d'aquesta setmana + offset setmanes
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  const day = d.getDay(); // 0=dg, 1=dl
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff + offset * 7);
+  return d;
 }
 
-function checkKey() {
-  if (!apiKey) {
-    $('key-prompt').style.display = 'block';
-    $('list').innerHTML = '';
-    return false;
-  }
-  $('key-prompt').style.display = 'none';
-  return true;
+function toast(msg, kind) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (kind || '');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 3500);
 }
+
+function showKeyPrompt() { $('key-prompt').classList.add('show'); }
+function hideKeyPrompt() { $('key-prompt').classList.remove('show'); }
 
 function saveKey() {
   const v = $('key-input').value.trim();
   if (!v) return;
   apiKey = v;
   localStorage.setItem(KEY_STORAGE, v);
-  load();
+  hideKeyPrompt();
+  loadAll();
 }
 
-async function load() {
-  if (!checkKey()) return;
+async function loadAll() {
+  if (!apiKey) { showKeyPrompt(); return; }
   const program = $('program').value;
-  const days = $('days').value;
-  $('list').innerHTML = '<div class="loading">Carregant…</div>';
-  $('subtitle').textContent = `Buscant ${program} dels propers ${days} dies...`;
-  selected.clear();
-  updateSubmit();
-
+  $('day-content').innerHTML = `<div class="class-grid">${'<div class="skeleton"></div>'.repeat(4)}</div>`;
   try {
-    const r = await fetch(`${API_BASE}/upcoming?program=${encodeURIComponent(program)}&days=${days}`, {
+    const r = await fetch(`${API_BASE}/upcoming?program=${encodeURIComponent(program)}&days=14&skip_booked=false`, {
       headers: { 'X-Api-Key': apiKey },
     });
     if (r.status === 401) {
       localStorage.removeItem(KEY_STORAGE);
-      apiKey = '';
-      setStatus('API key invàlida. Torna a entrar-la.', 'error');
-      checkKey();
-      return;
+      apiKey = ''; showKeyPrompt(); return;
     }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
-    allItems = data.items || [];
-    render();
-    $('subtitle').textContent = `${allItems.length} classes ${program} disponibles`;
+    classesByDate = {};
+    for (const it of (data.items || [])) {
+      if (!classesByDate[it.date]) classesByDate[it.date] = [];
+      classesByDate[it.date].push(it);
+    }
+    renderWeek();
+    renderDay();
   } catch (e) {
-    setStatus('Error: ' + e.message, 'error');
-    $('list').innerHTML = '<div class="empty">No s\'han pogut carregar les classes</div>';
+    toast('Error: ' + e.message, 'error');
   }
 }
 
-function render() {
-  const list = $('list');
-  if (!allItems.length) {
-    list.innerHTML = '<div class="empty">Cap classe disponible</div>';
-    return;
-  }
-
-  // Agrupar per dia
-  const byDay = {};
-  for (const item of allItems) {
-    const key = item.date;
-    if (!byDay[key]) byDay[key] = [];
-    byDay[key].push(item);
-  }
+function renderWeek() {
+  const start = weekStart(weekOffset);
+  const today = todayISO();
+  const month = MONTHS_LONG[start.getMonth()];
+  const year = start.getFullYear();
+  $('month-title').textContent = `${month} ${year}`;
 
   let html = '';
-  for (const date of Object.keys(byDay).sort()) {
-    const items = byDay[date];
-    const first = items[0];
-    const dayHeader = first.label.split(' ').slice(0, 2).join(' '); // "Dl 18/05"
-    html += `<div class="day-group"><div class="day-label">${dayHeader}</div>`;
-    for (const it of items) {
-      const id = `${it.date}-${it.time}`;
-      const isScheduled = it.already_scheduled;
-      html += `
-        <div class="class-item ${isScheduled ? 'scheduled' : ''}" data-id="${id}" data-class-id="${it.class_id}" data-date="${it.date}" data-time="${it.time}" data-program="${it.program}">
-          <div class="check"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div>
-          <div class="info">
-            <div class="time">${it.time}</div>
-            <div class="meta">${it.program}${isScheduled ? ' · ja programada' : ''}</div>
-          </div>
-        </div>`;
-    }
-    html += '</div>';
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    const iso = dateISO(d);
+    const isToday = iso === today;
+    const isPast = iso < today;
+    const isActive = iso === selectedDate;
+    const hasClasses = (classesByDate[iso] || []).length > 0;
+    const wd = DAYS_CA[d.getDay()];
+    const num = d.getDate();
+    html += `<div class="day ${isToday?'today':''} ${isActive?'active':''} ${isPast?'past':''} ${hasClasses?'':'no-classes'}" data-date="${iso}">
+      <div class="wd">${wd}</div>
+      <div class="num">${num}</div>
+      <span class="dot"></span>
+    </div>`;
   }
-  list.innerHTML = html;
+  $('week').innerHTML = html;
 
-  list.querySelectorAll('.class-item:not(.scheduled)').forEach(el => {
+  document.querySelectorAll('.day').forEach(el => {
     el.addEventListener('click', () => {
-      const id = el.dataset.id;
-      if (selected.has(id)) { selected.delete(id); el.classList.remove('selected'); }
-      else { selected.add(id); el.classList.add('selected'); }
-      updateSubmit();
+      selectedDate = el.dataset.date;
+      renderWeek();
+      renderDay();
     });
   });
 }
 
-function updateSubmit() {
-  const btn = $('submit');
-  btn.textContent = `Reservar (${selected.size})`;
-  btn.disabled = selected.size === 0;
+function renderDay() {
+  const items = (classesByDate[selectedDate] || []).slice().sort((a,b) => a.time.localeCompare(b.time));
+  const d = parseISO(selectedDate);
+  const heading = `${DAYS_LONG[d.getDay()]} <span class="muted">${d.getDate()} ${MONTHS_CA[d.getMonth()]}</span>`;
+  let html = `<div class="day-heading">${heading}</div>`;
+  if (!items.length) {
+    html += `<div class="empty"><div class="big">🌙</div>Cap classe aquest dia</div>`;
+  } else {
+    html += `<div class="class-grid">`;
+    for (const it of items) {
+      const key = `${it.date}_${it.time}_${it.class_id}`;
+      const isSel = selected.has(key);
+      const isSched = it.already_scheduled;
+      html += `<div class="class-tile ${isSel?'selected':''} ${isSched?'scheduled':''}"
+                    data-key="${key}" data-date="${it.date}" data-time="${it.time}" data-program="${it.program}">
+        <div class="tile-time">${it.time}</div>
+        <div class="tile-program">${it.program}</div>
+        <div class="tile-check">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+  $('day-content').innerHTML = html;
+
+  document.querySelectorAll('.class-tile:not(.scheduled)').forEach(el => {
+    el.addEventListener('click', () => {
+      const key = el.dataset.key;
+      if (selected.has(key)) { selected.delete(key); el.classList.remove('selected'); }
+      else { selected.add(key); el.classList.add('selected'); }
+      updateFooter();
+    });
+  });
+}
+
+function updateFooter() {
+  const n = selected.size;
+  $('selected-pill').textContent = `${n} seleccionada${n===1?'':'s'}`;
+  $('submit').disabled = n === 0;
 }
 
 async function submit() {
   if (!selected.size) return;
   const items = [];
-  document.querySelectorAll('.class-item.selected').forEach(el => {
-    items.push({
-      program: el.dataset.program,
-      date: el.dataset.date,
-      time: el.dataset.time,
-    });
+  document.querySelectorAll('.class-tile.selected').forEach(el => {
+    items.push({ program: el.dataset.program, date: el.dataset.date, time: el.dataset.time });
   });
 
   $('submit').disabled = true;
   $('submit').textContent = 'Programant...';
-  setStatus('Programant reserves...', '');
 
   try {
     const r = await fetch(`${API_BASE}/schedule`, {
@@ -278,31 +444,37 @@ async function submit() {
       body: JSON.stringify({ items }),
     });
     const data = await r.json();
-    const okCount = (data.scheduled || []).length;
-    const errCount = (data.errors || []).length;
-    if (okCount && !errCount) {
-      setStatus(`✅ ${okCount} reserves programades`, 'success');
-    } else if (okCount && errCount) {
-      setStatus(`⚠️ ${okCount} programades, ${errCount} errors`, 'error');
-    } else {
-      setStatus(`❌ ${errCount} errors: ` + (data.errors?.[0]?.error || ''), 'error');
-    }
-    if (okCount) {
-      selected.clear();
-      load();
-    }
+    const ok = (data.scheduled || []).length;
+    const err = (data.errors || []).length;
+    if (ok && !err) toast(`✅ ${ok} reserva${ok>1?'es':''} programada${ok>1?'es':''}`, 'success');
+    else if (ok) toast(`⚠️ ${ok} OK, ${err} errors`, 'error');
+    else toast(`❌ ${err} errors`, 'error');
+    if (ok) { selected.clear(); loadAll(); }
   } catch (e) {
-    setStatus('Error: ' + e.message, 'error');
+    toast('Error: ' + e.message, 'error');
   } finally {
-    updateSubmit();
+    $('submit').textContent = 'Reservar';
+    updateFooter();
   }
 }
 
 $('submit').addEventListener('click', submit);
-$('program').addEventListener('change', load);
-$('days').addEventListener('change', load);
+$('program').addEventListener('change', () => { selected.clear(); updateFooter(); loadAll(); });
+$('prev-week').addEventListener('click', () => { weekOffset = Math.max(0, weekOffset - 1); renderWeek(); });
+$('next-week').addEventListener('click', () => { weekOffset = Math.min(1, weekOffset + 1); renderWeek(); });
+$('today-btn').addEventListener('click', () => { weekOffset = 0; selectedDate = todayISO(); renderWeek(); renderDay(); });
 
-if (checkKey()) load();
+// Swipe horitzontal a la setmana
+let touchStartX = 0;
+$('week').addEventListener('touchstart', e => touchStartX = e.touches[0].clientX);
+$('week').addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  if (Math.abs(dx) < 50) return;
+  if (dx > 0 && weekOffset > 0) { weekOffset--; renderWeek(); }
+  else if (dx < 0 && weekOffset < 1) { weekOffset++; renderWeek(); }
+});
+
+if (!apiKey) showKeyPrompt(); else loadAll();
 </script>
 </body>
 </html>
