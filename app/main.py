@@ -33,13 +33,43 @@ scheduler = BackgroundScheduler(
 )
 
 
+import json as _json_mod
+
+HISTORY_FILE = config.DATA_DIR / "history.jsonl"
+
+
+def _append_history(entry: dict):
+    try:
+        with HISTORY_FILE.open("a", encoding="utf-8") as f:
+            f.write(_json_mod.dumps(entry, ensure_ascii=False, default=str) + "\n")
+    except Exception as e:
+        print(f"[history] error: {e}", flush=True)
+
+
 def reserve_job(class_id: str, label: str):
     """Funció que executa APScheduler a l'hora exacta."""
+    started_at = datetime.now(ZoneInfo(config.TIMEZONE)).isoformat()
     client = CrossheroClient(config.STORAGE_STATE)
     try:
         result = client.reserve_class(class_id)
         print(f"[reserve_job] {label} → {result}", flush=True)
+        _append_history({
+            "ts": started_at,
+            "label": label,
+            "class_id": class_id,
+            "result": result,
+        })
         return result
+    except Exception as e:
+        err = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        print(f"[reserve_job] {label} → EXCEPTION {err}", flush=True)
+        _append_history({
+            "ts": started_at,
+            "label": label,
+            "class_id": class_id,
+            "result": err,
+        })
+        return err
     finally:
         client.close()
 
@@ -301,6 +331,22 @@ def schedule(req: ScheduleRequest, _: None = Depends(require_api_key)):
         client.close()
 
     return {"scheduled": scheduled, "errors": errors}
+
+
+@app.get("/history")
+def history(limit: int = 50, _: None = Depends(require_api_key)):
+    """Retorna les últimes execucions del scheduler (èxits i errors)."""
+    if not HISTORY_FILE.exists():
+        return {"entries": []}
+    lines = HISTORY_FILE.read_text(encoding="utf-8").strip().split("\n")
+    entries = []
+    for line in lines[-limit:]:
+        try:
+            entries.append(_json_mod.loads(line))
+        except Exception:
+            pass
+    entries.reverse()  # més recent primer
+    return {"entries": entries, "total": len(lines)}
 
 
 @app.get("/pending")
