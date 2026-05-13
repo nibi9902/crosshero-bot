@@ -289,6 +289,16 @@ def list_programs():
     return {"programs": list(PROGRAMS.keys())}
 
 
+@app.get("/reservations")
+def my_reservations(_: None = Depends(require_api_key)):
+    """Llista les reserves actualment confirmades a Crosshero."""
+    client = CrossheroClient(config.STORAGE_STATE)
+    try:
+        return client.my_reservations()
+    finally:
+        client.close()
+
+
 @app.get("/preferences")
 def get_preferences(_: None = Depends(require_api_key)):
     return preferences.load()

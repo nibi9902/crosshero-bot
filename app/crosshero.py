@@ -96,6 +96,75 @@ class CrossheroClient:
             "csrf_token": token_val,
         }
 
+    def my_reservations(self) -> dict:
+        """
+        Llegeix les reserves confirmades del usuari a Crosshero
+        (extretes de /dashboard, que llista totes les properes).
+        """
+        from urllib.parse import unquote
+        r = self.client.get("/dashboard")
+        if r.status_code != 200 or "sign_in" in str(r.url):
+            return {"ok": False, "error": f"HTTP {r.status_code} o sessió caducada"}
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        # Programa ID → nom (invers)
+        prog_by_id = {v: k for k, v in PROGRAMS.items()}
+
+        out = []
+        seen = set()
+        # Iterem sobre cada link de cancel·lació (= reserva activa)
+        for cancel in soup.find_all("a", href=re.compile(r"/class_reservations/[^/]+/confirm_destroy")):
+            # Pugem per pares fins trobar un link a /dashboard/classes?date=...
+            container = None
+            for parent in cancel.parents:
+                cl = parent.find("a", href=re.compile(r"/dashboard/classes\?"))
+                if cl:
+                    container = parent
+                    container_class_link = cl
+                    break
+            else:
+                continue
+
+            href = container_class_link.get("href", "")
+            m_date = re.search(r"date=([^&]+)", href)
+            m_id = re.search(r"id=([^&]+)", href)
+            m_prog = re.search(r"program_id=([^&]+)", href)
+            if not (m_date and m_id):
+                continue
+
+            class_id = m_id.group(1)
+            if class_id in seen:
+                continue
+            seen.add(class_id)
+
+            date_str = unquote(m_date.group(1))  # DD/MM/YYYY
+            program_id = m_prog.group(1) if m_prog else None
+            program_name = prog_by_id.get(program_id)
+
+            text = container.get_text(" ", strip=True)
+            m_time = re.search(r"\b(\d{1,2}:\d{2})\b", text)
+            hora = m_time.group(1) if m_time else None
+
+            # Converteix DD/MM/YYYY → YYYY-MM-DD
+            try:
+                d_iso = datetime.strptime(date_str, "%d/%m/%Y").date().isoformat()
+            except Exception:
+                d_iso = None
+
+            out.append({
+                "date": d_iso,
+                "date_raw": date_str,
+                "time": hora,
+                "program": program_name,
+                "program_id": program_id,
+                "class_id": class_id,
+                "cancel_url": cancel.get("href"),
+            })
+
+        # Ordena per data ascendent
+        out.sort(key=lambda x: (x["date"] or "", x["time"] or ""))
+        return {"ok": True, "count": len(out), "reservations": out}
+
     def reserve_class(self, class_id: str, csrf_token: Optional[str] = None) -> dict:
         """
         Reserva una classe pel seu ID. Si no es passa csrf_token, en demana un nou.

@@ -365,7 +365,9 @@
     <button class="save-prefs" id="save-prefs">Guardar i aplicar</button>
   </div>
   <div id="pane-queue" class="pref-pane">
-    <div class="pref-label" style="padding: 12px 0 6px;">Reserves programades</div>
+    <div class="pref-label" style="padding: 12px 0 6px;">✅ Confirmades a Crosshero</div>
+    <div class="scheduled-list" id="confirmed-list"></div>
+    <div class="pref-label" style="padding: 16px 0 6px;">⏳ Programades (esperant disparament)</div>
     <div class="scheduled-list" id="scheduled-list"></div>
   </div>
 </main>
@@ -702,15 +704,36 @@ $('save-prefs').addEventListener('click', async () => {
   }
 });
 
-// ─── Queue (Pending) ───
+// ─── Queue (Pending + Confirmades) ───
 async function loadQueue() {
-  $('scheduled-list').innerHTML = '<div class="empty" style="padding:30px 0;">Carregant…</div>';
-  try {
-    const r = await fetch(`${API_BASE}/pending`, { headers: authHeaders() });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
-    renderQueue(data.jobs || []);
-  } catch (e) { toast('Error: ' + e.message, 'error'); }
+  $('scheduled-list').innerHTML = '<div class="empty" style="padding:20px 0;">Carregant…</div>';
+  $('confirmed-list').innerHTML = '<div class="empty" style="padding:20px 0;">Carregant…</div>';
+  // Carreguem en paral·lel
+  Promise.all([
+    fetch(`${API_BASE}/pending`, { headers: authHeaders() }).then(r => r.ok ? r.json() : Promise.reject('HTTP ' + r.status)),
+    fetch(`${API_BASE}/reservations`, { headers: authHeaders() }).then(r => r.ok ? r.json() : Promise.reject('HTTP ' + r.status)),
+  ]).then(([pending, reservations]) => {
+    renderQueue(pending.jobs || []);
+    renderConfirmed(reservations.reservations || []);
+  }).catch(e => toast('Error: ' + e, 'error'));
+}
+
+function renderConfirmed(items) {
+  const list = $('confirmed-list');
+  if (!items.length) {
+    list.innerHTML = '<div class="empty" style="padding:20px 0;">Cap reserva confirmada</div>';
+    return;
+  }
+  list.innerHTML = items.map(r => {
+    const dateStr = r.date ? new Date(r.date + 'T00:00:00').toLocaleDateString('ca-ES',{weekday:'short',day:'numeric',month:'short'}) : r.date_raw;
+    const time = r.time ? ' · ' + r.time : '';
+    return `<div class="scheduled-row">
+      <div class="info">
+        <div class="title">${r.program || '?'}${time}</div>
+        <div class="when">${dateStr}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function renderQueue(jobs) {
