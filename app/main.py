@@ -482,7 +482,9 @@ def history(limit: int = 50, _: None = Depends(require_api_key)):
 def pending(_: None = Depends(require_api_key)):
     out = []
     for j in scheduler.get_jobs():
-        parts = j.id.split("-")
+        # Saltar jobs interns del sistema (prefix __)
+        if j.id.startswith("__"):
+            continue
         out.append({
             "id": j.id,
             "next_run": j.next_run_time.isoformat() if j.next_run_time else None,
