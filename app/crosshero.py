@@ -96,74 +96,60 @@ class CrossheroClient:
             "csrf_token": token_val,
         }
 
-    def my_reservations(self) -> dict:
+    def my_reservations(self, only_future: bool = True, max_pages: int = 5) -> dict:
         """
-        Llegeix les reserves confirmades del usuari a Crosshero
-        (extretes de /dashboard, que llista totes les properes).
+        Llegeix totes les reserves de l'usuari paginant /dashboard/reservations.
+        Si only_future=True, retorna només les futures (incloent avui).
         """
-        from urllib.parse import unquote
-        r = self.client.get("/dashboard")
-        if r.status_code != 200 or "sign_in" in str(r.url):
-            return {"ok": False, "error": f"HTTP {r.status_code} o sessió caducada"}
+        today = date.today()
+        all_items = []
+        seen_keys = set()
 
-        soup = BeautifulSoup(r.text, "html.parser")
-        # Programa ID → nom (invers)
-        prog_by_id = {v: k for k, v in PROGRAMS.items()}
+        for page in range(1, max_pages + 1):
+            r = self.client.get("/dashboard/reservations", params={"page": page} if page > 1 else {})
+            if r.status_code != 200 or "sign_in" in str(r.url):
+                if page == 1:
+                    return {"ok": False, "error": f"HTTP {r.status_code} o sessió caducada"}
+                break
 
-        out = []
-        seen = set()
-        # Iterem sobre cada link de cancel·lació (= reserva activa)
-        for cancel in soup.find_all("a", href=re.compile(r"/class_reservations/[^/]+/confirm_destroy")):
-            # Pugem per pares fins trobar un link a /dashboard/classes?date=...
-            container = None
-            for parent in cancel.parents:
-                cl = parent.find("a", href=re.compile(r"/dashboard/classes\?"))
-                if cl:
-                    container = parent
-                    container_class_link = cl
-                    break
-            else:
-                continue
+            html = r.text
+            # Patró: DD/MM/YYYY HH:MM seguit d'espais/salts (NO entre cometes — això són timestamps de modif)
+            for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2})", html):
+                date_s = m.group(1)
+                hora = m.group(2)
+                # Excloure timestamps de tooltips (van seguits de cometa i data-toggle)
+                end_pos = m.end()
+                next_chars = html[end_pos:end_pos + 30]
+                if '"' in next_chars[:5] or "data-toggle" in next_chars:
+                    continue
+                key = (date_s, hora)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
 
-            href = container_class_link.get("href", "")
-            m_date = re.search(r"date=([^&]+)", href)
-            m_id = re.search(r"id=([^&]+)", href)
-            m_prog = re.search(r"program_id=([^&]+)", href)
-            if not (m_date and m_id):
-                continue
+                try:
+                    d = datetime.strptime(date_s, "%d/%m/%Y").date()
+                except Exception:
+                    continue
 
-            class_id = m_id.group(1)
-            if class_id in seen:
-                continue
-            seen.add(class_id)
+                if only_future and d < today:
+                    continue
 
-            date_str = unquote(m_date.group(1))  # DD/MM/YYYY
-            program_id = m_prog.group(1) if m_prog else None
-            program_name = prog_by_id.get(program_id)
+                all_items.append({
+                    "date": d.isoformat(),
+                    "date_raw": date_s,
+                    "time": hora,
+                    "is_today": d == today,
+                    "is_past": d < today,
+                })
 
-            text = container.get_text(" ", strip=True)
-            m_time = re.search(r"\b(\d{1,2}:\d{2})\b", text)
-            hora = m_time.group(1) if m_time else None
+            # Si la pàgina té menys de 10 entrades, segurament és l'última
+            page_count_now = len(list(re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2})", html)))
+            if page_count_now == 0:
+                break
 
-            # Converteix DD/MM/YYYY → YYYY-MM-DD
-            try:
-                d_iso = datetime.strptime(date_str, "%d/%m/%Y").date().isoformat()
-            except Exception:
-                d_iso = None
-
-            out.append({
-                "date": d_iso,
-                "date_raw": date_str,
-                "time": hora,
-                "program": program_name,
-                "program_id": program_id,
-                "class_id": class_id,
-                "cancel_url": cancel.get("href"),
-            })
-
-        # Ordena per data ascendent
-        out.sort(key=lambda x: (x["date"] or "", x["time"] or ""))
-        return {"ok": True, "count": len(out), "reservations": out}
+        all_items.sort(key=lambda x: (x["date"], x["time"]))
+        return {"ok": True, "count": len(all_items), "reservations": all_items}
 
     def reserve_class(self, class_id: str, csrf_token: Optional[str] = None) -> dict:
         """
