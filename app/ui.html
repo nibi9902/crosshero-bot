@@ -126,14 +126,28 @@
     background: var(--accent-soft); border-color: var(--accent);
   }
   .class-tile.scheduled {
-    background: var(--bg-elevated); opacity: 0.55;
-    cursor: not-allowed;
+    background: var(--bg-elevated); opacity: 0.6;
+    cursor: not-allowed; border-color: rgba(255,107,53,0.3);
   }
   .class-tile.scheduled::after {
-    content: "Programada"; position: absolute; top: 6px; right: 8px;
-    font-size: 9px; font-weight: 600; color: var(--success);
+    content: "⏳ Programada"; position: absolute; top: 6px; right: 8px;
+    font-size: 9px; font-weight: 600; color: var(--accent);
     text-transform: uppercase; letter-spacing: 0.05em;
   }
+  .class-tile.confirmed {
+    background: rgba(48, 209, 88, 0.15);
+    border-color: var(--success);
+    cursor: not-allowed;
+  }
+  .class-tile.confirmed::after {
+    content: "✓ Reservada"; position: absolute; top: 6px; right: 8px;
+    font-size: 9px; font-weight: 700; color: var(--success);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .class-tile.confirmed .tile-time { color: var(--success); }
+  /* Verd al dot del dia si té reserves confirmades */
+  .day .dot.confirmed { background: var(--success); }
+  .day.active .dot.confirmed { background: #fff; }
   .cancel-btn {
     position: absolute; bottom: 8px; right: 8px;
     background: rgba(255,69,58,0.15); color: var(--error);
@@ -409,6 +423,7 @@ function authHeaders(extra) {
 let weekOffset = 0;            // setmanes des de la setmana actual
 let selectedDate = todayISO(); // dia seleccionat al calendari
 let classesByDate = {};        // { 'YYYY-MM-DD': [items] }
+let confirmedSet = new Set();  // claus "YYYY-MM-DD_HH:MM" reservades a Crosshero
 let selected = new Set();      // claus únics per item seleccionat
 
 function $(id) { return document.getElementById(id); }
@@ -459,22 +474,31 @@ async function loadAll() {
   const program = $('program').value;
   $('day-content').innerHTML = `<div class="class-grid">${'<div class="skeleton"></div>'.repeat(4)}</div>`;
   try {
-    const r = await fetch(`${API_BASE}/upcoming?program=${encodeURIComponent(program)}&days=14&skip_booked=false`, {
-      headers: authHeaders(),
-    });
-    if (r.status === 401) {
+    const [upcomingR, resR] = await Promise.all([
+      fetch(`${API_BASE}/upcoming?program=${encodeURIComponent(program)}&days=14&skip_booked=false`, { headers: authHeaders() }),
+      fetch(`${API_BASE}/reservations`, { headers: authHeaders() }),
+    ]);
+    if (upcomingR.status === 401 || resR.status === 401) {
       localStorage.removeItem(KEY_STORAGE);
       apiKey = '';
       toast('API key invàlida', 'error');
       showKeyPrompt();
       return;
     }
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data = await r.json();
+    if (!upcomingR.ok) throw new Error(`HTTP ${upcomingR.status}`);
+    const data = await upcomingR.json();
     classesByDate = {};
     for (const it of (data.items || [])) {
       if (!classesByDate[it.date]) classesByDate[it.date] = [];
       classesByDate[it.date].push(it);
+    }
+    // Confirmades a Crosshero
+    confirmedSet = new Set();
+    if (resR.ok) {
+      const rdata = await resR.json();
+      for (const r of (rdata.reservations || [])) {
+        if (r.date && r.time) confirmedSet.add(`${r.date}_${r.time}`);
+      }
     }
     renderWeek();
     renderDay();
@@ -498,12 +522,13 @@ function renderWeek() {
     const isPast = iso < today;
     const isActive = iso === selectedDate;
     const hasClasses = (classesByDate[iso] || []).length > 0;
+    const hasConfirmed = (classesByDate[iso] || []).some(c => confirmedSet.has(`${c.date}_${c.time}`));
     const wd = DAYS_CA[d.getDay()];
     const num = d.getDate();
     html += `<div class="day ${isToday?'today':''} ${isActive?'active':''} ${isPast?'past':''} ${hasClasses?'':'no-classes'}" data-date="${iso}">
       <div class="wd">${wd}</div>
       <div class="num">${num}</div>
-      <span class="dot"></span>
+      <span class="dot ${hasConfirmed?'confirmed':''}"></span>
     </div>`;
   }
   $('week').innerHTML = html;
@@ -529,8 +554,10 @@ function renderDay() {
     for (const it of items) {
       const key = `${it.date}_${it.time}_${it.class_id}`;
       const isSel = selected.has(key);
-      const isSched = it.already_scheduled;
-      html += `<div class="class-tile ${isSel?'selected':''} ${isSched?'scheduled':''}"
+      const isConfirmed = confirmedSet.has(`${it.date}_${it.time}`);
+      const isSched = !isConfirmed && it.already_scheduled;
+      const cls = isConfirmed ? 'confirmed' : (isSched ? 'scheduled' : '');
+      html += `<div class="class-tile ${isSel?'selected':''} ${cls}"
                     data-key="${key}" data-date="${it.date}" data-time="${it.time}" data-program="${it.program}">
         <div class="tile-time">${it.time}</div>
         <div class="tile-program">${it.program}</div>
@@ -543,7 +570,7 @@ function renderDay() {
   }
   $('day-content').innerHTML = html;
 
-  document.querySelectorAll('.class-tile:not(.scheduled)').forEach(el => {
+  document.querySelectorAll('.class-tile:not(.scheduled):not(.confirmed)').forEach(el => {
     el.addEventListener('click', () => {
       const key = el.dataset.key;
       if (selected.has(key)) { selected.delete(key); el.classList.remove('selected'); }
