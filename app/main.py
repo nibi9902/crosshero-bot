@@ -22,9 +22,10 @@ from pydantic import BaseModel, Field
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 from .crosshero import CrossheroClient, PROGRAMS
-from . import config
+from . import config, preferences
 
 
 scheduler = BackgroundScheduler(
@@ -74,9 +75,103 @@ def reserve_job(class_id: str, label: str):
         client.close()
 
 
+def _schedule_one(client: CrossheroClient, program: str, the_date: date, the_time: str) -> dict:
+    """Localitza la classe i la programa al scheduler. Retorna info."""
+    tz = ZoneInfo(config.TIMEZONE)
+    lst = client.list_classes(program, the_date)
+    if not lst.get("ok"):
+        return {"ok": False, "reason": lst.get("error", "unknown")}
+    match = next((c for c in lst["classes"] if c["hora"] == the_time), None)
+    if not match:
+        return {"ok": False, "reason": f"no hi ha classe {program} {the_time} el {the_date}"}
+
+    class_id = match["id"]
+    h, m = map(int, the_time.split(":"))
+    class_dt = datetime.combine(the_date, datetime.min.time()).replace(
+        hour=h, minute=m, tzinfo=tz
+    )
+    fire_at = class_dt - timedelta(days=config.RESERVATION_LEAD_DAYS) \
+                      - timedelta(seconds=config.FIRE_OFFSET_SECONDS)
+    now = datetime.now(tz)
+    if fire_at <= now:
+        fire_at = now + timedelta(seconds=2)
+
+    job_id = f"{program}-{the_date}-{the_time}-{class_id[:6]}"
+    label = f"{program} {the_date} {the_time}"
+
+    # Skip if ja està programat
+    existing = scheduler.get_job(job_id)
+    if existing:
+        return {"ok": True, "skipped": True, "job_id": job_id}
+
+    scheduler.add_job(
+        reserve_job,
+        trigger=DateTrigger(run_date=fire_at),
+        args=[class_id, label],
+        id=job_id,
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "class_id": class_id,
+        "fires_at": fire_at.isoformat(),
+    }
+
+
+def auto_schedule_job():
+    """
+    Cron diari: mira les preferències i programa les classes properes
+    que encara no estiguin a la cua.
+    """
+    prefs = preferences.load()
+    if not prefs.get("auto_schedule"):
+        return
+
+    tz = ZoneInfo(config.TIMEZONE)
+    today = datetime.now(tz).date()
+    horizon = int(prefs.get("horizon_days", 14))
+    program = prefs.get("program", "Hyrox")
+
+    actions = []
+    client = CrossheroClient(config.STORAGE_STATE)
+    try:
+        for offset in range(horizon):
+            d = today + timedelta(days=offset)
+            wd = d.weekday()  # 0=Dl
+            for slot in prefs.get("slots", []):
+                if slot["weekday"] != wd:
+                    continue
+                res = _schedule_one(client, program, d, slot["time"])
+                actions.append({"date": str(d), "time": slot["time"], **res})
+    finally:
+        client.close()
+
+    print(f"[auto_schedule] actions: {actions}", flush=True)
+    _append_history({
+        "ts": datetime.now(tz).isoformat(),
+        "label": "AUTO_SCHEDULE",
+        "actions": actions,
+    })
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.start()
+    # Cron diari a les 03:00 que assegura que totes les classes
+    # que coincideixen amb les preferències estan programades
+    scheduler.add_job(
+        auto_schedule_job,
+        trigger=CronTrigger(hour=3, minute=0, timezone=config.TIMEZONE),
+        id="__auto_schedule_daily",
+        replace_existing=True,
+    )
+    # I executar-lo també a l'arrencada (per omplir la cua immediatament)
+    try:
+        auto_schedule_job()
+    except Exception as e:
+        print(f"[startup auto_schedule] {e}", flush=True)
     yield
     scheduler.shutdown(wait=False)
 
@@ -192,6 +287,30 @@ async def upload_session(request: Request, _: None = Depends(require_api_key)):
 @app.get("/programs")
 def list_programs():
     return {"programs": list(PROGRAMS.keys())}
+
+
+@app.get("/preferences")
+def get_preferences(_: None = Depends(require_api_key)):
+    return preferences.load()
+
+
+@app.put("/preferences")
+def put_preferences(prefs: dict, _: None = Depends(require_api_key)):
+    saved = preferences.save(prefs)
+    # Auto-aplica les noves preferències immediatament
+    if saved.get("auto_schedule"):
+        try:
+            auto_schedule_job()
+        except Exception as e:
+            print(f"[put_preferences auto] {e}", flush=True)
+    return saved
+
+
+@app.post("/run-auto-schedule")
+def run_auto_schedule(_: None = Depends(require_api_key)):
+    """Força una execució del cron d'auto-reserva ara mateix."""
+    auto_schedule_job()
+    return {"ok": True}
 
 
 DAYS_CA = ["Dl", "Dm", "Dc", "Dj", "Dv", "Ds", "Dg"]

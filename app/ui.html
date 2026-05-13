@@ -134,6 +134,94 @@
     font-size: 9px; font-weight: 600; color: var(--success);
     text-transform: uppercase; letter-spacing: 0.05em;
   }
+  .cancel-btn {
+    position: absolute; bottom: 8px; right: 8px;
+    background: rgba(255,69,58,0.15); color: var(--error);
+    border: 1px solid rgba(255,69,58,0.3);
+    padding: 4px 10px; border-radius: 8px;
+    font-size: 11px; font-weight: 600;
+    cursor: pointer;
+  }
+  .cancel-btn:active { background: rgba(255,69,58,0.3); }
+
+  /* Tabs */
+  .tabs {
+    display: flex; gap: 4px; margin: 6px 0 4px;
+    background: var(--bg-elevated); border-radius: 10px; padding: 3px;
+  }
+  .tab {
+    flex: 1; padding: 8px; text-align: center; cursor: pointer;
+    font-size: 13px; font-weight: 600; color: var(--muted);
+    border-radius: 8px; transition: all 0.15s;
+    user-select: none;
+  }
+  .tab.active { background: var(--card); color: var(--text); }
+
+  /* Preferences pane */
+  .pref-pane { padding: 4px 0 20px; display: none; }
+  .pref-pane.show { display: block; }
+  .pref-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 0; border-bottom: 0.5px solid var(--border);
+  }
+  .pref-row:last-child { border-bottom: 0; }
+  .pref-label { font-size: 15px; }
+  .pref-help { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  /* iOS-style switch */
+  .switch {
+    position: relative; width: 51px; height: 31px;
+    background: var(--bg-elevated); border-radius: 16px;
+    cursor: pointer; transition: background 0.2s;
+  }
+  .switch.on { background: var(--success); }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 27px; height: 27px; border-radius: 50%;
+    background: #fff; transition: transform 0.2s;
+  }
+  .switch.on::after { transform: translateX(20px); }
+
+  .slot-grid {
+    display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px;
+    align-items: center; padding: 8px 0;
+  }
+  .slot-grid select {
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    padding: 10px 12px; border-radius: 10px; font: inherit; font-size: 14px;
+    appearance: none; -webkit-appearance: none; padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%238e8e93' d='M5 6 0 0h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center;
+  }
+  .slot-grid .remove {
+    background: rgba(255,69,58,0.15); color: var(--error);
+    border: 0; border-radius: 10px; padding: 10px 14px; font-size: 18px;
+    cursor: pointer;
+  }
+  .add-slot {
+    width: 100%; margin-top: 12px; padding: 12px;
+    background: var(--card); color: var(--accent);
+    border: 1.5px dashed var(--border); border-radius: 12px;
+    font-size: 14px; font-weight: 500; cursor: pointer;
+  }
+  .save-prefs {
+    width: 100%; margin-top: 16px; padding: 14px;
+    background: var(--accent); color: #fff; border: 0; border-radius: 12px;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .scheduled-list { padding: 8px 0 0; }
+  .scheduled-row {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px 14px; margin-bottom: 8px;
+  }
+  .scheduled-row .info { flex: 1; }
+  .scheduled-row .title { font-weight: 600; }
+  .scheduled-row .when { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .scheduled-row .del {
+    background: rgba(255,69,58,0.15); color: var(--error);
+    border: 0; border-radius: 8px; padding: 8px 12px;
+    font-size: 12px; font-weight: 600; cursor: pointer;
+  }
   .tile-time {
     font-size: 22px; font-weight: 700; letter-spacing: -0.01em;
   }
@@ -243,17 +331,43 @@
       <option value="ESQUENA SANA">Esquena Sana</option>
     </select>
   </div>
-  <div class="month-title" id="month-title">Carregant...</div>
-  <div class="week" id="week"></div>
-  <div class="week-nav">
-    <button class="nav-btn" id="prev-week">‹ Anterior</button>
-    <button class="nav-btn" id="today-btn">Avui</button>
-    <button class="nav-btn" id="next-week">Següent ›</button>
+  <div class="tabs">
+    <div class="tab active" data-tab="calendar">Calendari</div>
+    <div class="tab" data-tab="auto">Auto-reserva</div>
+    <div class="tab" data-tab="queue">Cua</div>
+  </div>
+  <div id="cal-header">
+    <div class="month-title" id="month-title">Carregant...</div>
+    <div class="week" id="week"></div>
+    <div class="week-nav">
+      <button class="nav-btn" id="prev-week">‹ Anterior</button>
+      <button class="nav-btn" id="today-btn">Avui</button>
+      <button class="nav-btn" id="next-week">Següent ›</button>
+    </div>
   </div>
 </header>
 
 <main>
-  <div id="day-content"></div>
+  <div id="pane-calendar"><div id="day-content"></div></div>
+  <div id="pane-auto" class="pref-pane">
+    <div class="pref-row">
+      <div>
+        <div class="pref-label">Auto-reserva activa</div>
+        <div class="pref-help">Reserva automàticament les classes que coincideixen amb els teus slots</div>
+      </div>
+      <div class="switch" id="auto-switch"></div>
+    </div>
+    <div style="margin-top: 16px;">
+      <div class="pref-label" style="margin-bottom: 8px;">Slots setmanals</div>
+      <div id="slots-list"></div>
+      <button class="add-slot" id="add-slot">+ Afegir slot</button>
+    </div>
+    <button class="save-prefs" id="save-prefs">Guardar i aplicar</button>
+  </div>
+  <div id="pane-queue" class="pref-pane">
+    <div class="pref-label" style="padding: 12px 0 6px;">Reserves programades</div>
+    <div class="scheduled-list" id="scheduled-list"></div>
+  </div>
 </main>
 
 <footer>
@@ -479,6 +593,160 @@ $('program').addEventListener('change', () => { selected.clear(); updateFooter()
 $('prev-week').addEventListener('click', () => { weekOffset = Math.max(0, weekOffset - 1); renderWeek(); });
 $('next-week').addEventListener('click', () => { weekOffset = Math.min(1, weekOffset + 1); renderWeek(); });
 $('today-btn').addEventListener('click', () => { weekOffset = 0; selectedDate = todayISO(); renderWeek(); renderDay(); });
+
+// ─── Tabs ───
+let currentTab = 'calendar';
+function setTab(name) {
+  currentTab = name;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  $('pane-calendar').style.display = name === 'calendar' ? 'block' : 'none';
+  $('cal-header').style.display = name === 'calendar' ? 'block' : 'none';
+  $('pane-auto').classList.toggle('show', name === 'auto');
+  $('pane-queue').classList.toggle('show', name === 'queue');
+  document.querySelector('footer').style.display = name === 'calendar' ? 'block' : 'none';
+  if (name === 'auto') loadPreferences();
+  if (name === 'queue') loadQueue();
+}
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => setTab(t.dataset.tab));
+});
+
+// ─── Preferences ───
+const WEEKDAY_OPTS = [
+  {v:0,t:'Dilluns'}, {v:1,t:'Dimarts'}, {v:2,t:'Dimecres'},
+  {v:3,t:'Dijous'}, {v:4,t:'Divendres'}, {v:5,t:'Dissabte'}, {v:6,t:'Diumenge'},
+];
+const TIME_OPTS = ['07:00','08:00','09:00','09:30','10:00','10:30','11:00',
+                   '13:00','13:30','15:30','16:30','17:30','18:30','19:00','19:30','20:00','20:30'];
+let currentPrefs = null;
+
+async function loadPreferences() {
+  try {
+    const r = await fetch(`${API_BASE}/preferences`, { headers: authHeaders() });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    currentPrefs = await r.json();
+    renderPreferences();
+  } catch (e) { toast('Error prefs: ' + e.message, 'error'); }
+}
+
+function renderPreferences() {
+  if (!currentPrefs) return;
+  $('auto-switch').classList.toggle('on', !!currentPrefs.auto_schedule);
+  const list = $('slots-list');
+  list.innerHTML = '';
+  (currentPrefs.slots || []).forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'slot-grid';
+    row.innerHTML = `
+      <select data-i="${i}" data-k="weekday">
+        ${WEEKDAY_OPTS.map(o => `<option value="${o.v}" ${o.v==s.weekday?'selected':''}>${o.t}</option>`).join('')}
+      </select>
+      <select data-i="${i}" data-k="time">
+        ${TIME_OPTS.map(t => `<option value="${t}" ${t==s.time?'selected':''}>${t}</option>`).join('')}
+      </select>
+      <button class="remove" data-i="${i}">×</button>`;
+    list.appendChild(row);
+  });
+  list.querySelectorAll('select').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const i = +sel.dataset.i, k = sel.dataset.k;
+      currentPrefs.slots[i][k] = k === 'weekday' ? +sel.value : sel.value;
+    });
+  });
+  list.querySelectorAll('.remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentPrefs.slots.splice(+btn.dataset.i, 1);
+      renderPreferences();
+    });
+  });
+}
+
+$('auto-switch').addEventListener('click', () => {
+  if (!currentPrefs) return;
+  currentPrefs.auto_schedule = !currentPrefs.auto_schedule;
+  $('auto-switch').classList.toggle('on', currentPrefs.auto_schedule);
+});
+
+$('add-slot').addEventListener('click', () => {
+  if (!currentPrefs) return;
+  if (!currentPrefs.slots) currentPrefs.slots = [];
+  currentPrefs.slots.push({ weekday: 0, time: '07:00' });
+  renderPreferences();
+});
+
+$('save-prefs').addEventListener('click', async () => {
+  if (!currentPrefs) return;
+  $('save-prefs').disabled = true;
+  $('save-prefs').textContent = 'Guardant...';
+  try {
+    const r = await fetch(`${API_BASE}/preferences`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        auto_schedule: currentPrefs.auto_schedule,
+        program: $('program').value,
+        horizon_days: 14,
+        slots: currentPrefs.slots,
+      }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    currentPrefs = await r.json();
+    toast('✅ Preferències guardades i aplicades', 'success');
+    renderPreferences();
+    loadAll();  // refresca calendari per veure noves classes programades
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    $('save-prefs').disabled = false;
+    $('save-prefs').textContent = 'Guardar i aplicar';
+  }
+});
+
+// ─── Queue (Pending) ───
+async function loadQueue() {
+  $('scheduled-list').innerHTML = '<div class="empty" style="padding:30px 0;">Carregant…</div>';
+  try {
+    const r = await fetch(`${API_BASE}/pending`, { headers: authHeaders() });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    renderQueue(data.jobs || []);
+  } catch (e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function renderQueue(jobs) {
+  const list = $('scheduled-list');
+  if (!jobs.length) {
+    list.innerHTML = '<div class="empty"><div class="big">📭</div>Cap reserva programada</div>';
+    return;
+  }
+  // Ordenar per data de dispar
+  jobs.sort((a,b) => (a.next_run || '').localeCompare(b.next_run || ''));
+  list.innerHTML = jobs.map(j => {
+    const title = (j.args && j.args[1]) || j.id;
+    const when = j.next_run ? new Date(j.next_run).toLocaleString('ca-ES',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '?';
+    return `<div class="scheduled-row">
+      <div class="info">
+        <div class="title">${title}</div>
+        <div class="when">Disparament: ${when}</div>
+      </div>
+      <button class="del" data-id="${j.id}">Cancel·lar</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      if (!confirm('Cancel·lar aquesta reserva programada?')) return;
+      try {
+        const r = await fetch(`${API_BASE}/pending/${encodeURIComponent(id)}`, {
+          method: 'DELETE', headers: authHeaders(),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        toast('Cancel·lada', 'success');
+        loadQueue();
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    });
+  });
+}
 
 // Swipe horitzontal a la setmana
 let touchStartX = 0;
