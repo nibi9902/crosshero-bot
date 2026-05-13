@@ -98,34 +98,56 @@ class CrossheroClient:
 
     def my_reservations(self, only_future: bool = True, max_pages: int = 5) -> dict:
         """
-        Llegeix totes les reserves de l'usuari paginant /dashboard/reservations.
-        Si only_future=True, retorna només les futures (incloent avui).
+        Llegeix les reserves ACTIVES de l'usuari paginant /dashboard/reservations.
+
+        Considera "activa" una fila que té link "Cancelar" (confirm_destroy).
+        Les que només tenen "Ver clase" són històriques (atendides o cancel·lades).
         """
         today = date.today()
+        prog_by_id = {v: k for k, v in PROGRAMS.items()}
         all_items = []
         seen_keys = set()
 
         for page in range(1, max_pages + 1):
-            r = self.client.get("/dashboard/reservations", params={"page": page} if page > 1 else {})
+            params = {"page": page} if page > 1 else {}
+            r = self.client.get("/dashboard/reservations", params=params)
             if r.status_code != 200 or "sign_in" in str(r.url):
                 if page == 1:
                     return {"ok": False, "error": f"HTTP {r.status_code} o sessió caducada"}
                 break
 
-            html = r.text
-            # Patró: DD/MM/YYYY HH:MM seguit d'espais/salts (NO entre cometes — això són timestamps de modif)
-            for m in re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2})", html):
-                date_s = m.group(1)
-                hora = m.group(2)
-                # Excloure timestamps de tooltips (van seguits de cometa i data-toggle)
-                end_pos = m.end()
-                next_chars = html[end_pos:end_pos + 30]
-                if '"' in next_chars[:5] or "data-toggle" in next_chars:
+            soup = BeautifulSoup(r.text, "html.parser")
+            rows_on_page = 0
+
+            for tr in soup.select("tbody tr"):
+                rows_on_page += 1
+                # Indicador d'activa: té link de cancel·lació
+                cancel_link = None
+                for a in tr.select(".dropdown-menu a, .table-buttons a"):
+                    href = a.get("href", "")
+                    text = a.get_text(strip=True).lower()
+                    if "confirm_destroy" in href or "cancelar" in text:
+                        cancel_link = a
+                        break
+                if not cancel_link:
+                    continue  # Històrica/cancel·lada — saltem
+
+                # Programa
+                prog_td = tr.select_one(".reservation-program")
+                program = prog_td.get_text(" ", strip=True) if prog_td else None
+
+                # Data + hora
+                date_td = tr.select_one(".reservation-date")
+                date_text = date_td.get_text(" ", strip=True) if date_td else ""
+                m_dt = re.search(r"(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2})", date_text)
+                if not m_dt:
                     continue
-                key = (date_s, hora)
-                if key in seen_keys:
+                date_s = m_dt.group(1)
+                hora = m_dt.group(2)
+
+                # Marca "Cancelada" al text → no és activa (per seguretat)
+                if "cancelada" in date_text.lower():
                     continue
-                seen_keys.add(key)
 
                 try:
                     d = datetime.strptime(date_s, "%d/%m/%Y").date()
@@ -135,17 +157,40 @@ class CrossheroClient:
                 if only_future and d < today:
                     continue
 
+                key = (date_s, hora)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+
+                # Class_id i program_id (del link "Ver clase")
+                class_id = None
+                program_id = None
+                for a in tr.select(".dropdown-menu a"):
+                    href = a.get("href", "")
+                    if "/dashboard/classes" in href:
+                        m_id = re.search(r"[?&]id=([^&]+)", href)
+                        m_prog = re.search(r"program_id=([^&]+)", href)
+                        if m_id:
+                            class_id = m_id.group(1)
+                        if m_prog:
+                            program_id = m_prog.group(1)
+                            if not program:
+                                program = prog_by_id.get(program_id)
+                        break
+
                 all_items.append({
                     "date": d.isoformat(),
                     "date_raw": date_s,
                     "time": hora,
+                    "program": program,
+                    "program_id": program_id,
+                    "class_id": class_id,
+                    "cancel_url": cancel_link.get("href"),
                     "is_today": d == today,
                     "is_past": d < today,
                 })
 
-            # Si la pàgina té menys de 10 entrades, segurament és l'última
-            page_count_now = len(list(re.finditer(r"(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2})", html)))
-            if page_count_now == 0:
+            if rows_on_page == 0:
                 break
 
         all_items.sort(key=lambda x: (x["date"], x["time"]))
