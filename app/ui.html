@@ -269,8 +269,8 @@
   <div class="key-card">
     <h3>API Key</h3>
     <p>Enganxa la clau d'accés. Es guardarà només en aquest dispositiu.</p>
-    <input type="password" id="key-input" placeholder="API key" autocomplete="off">
-    <button class="submit" onclick="saveKey()">Guardar</button>
+    <input type="text" id="key-input" placeholder="API key" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <button type="button" class="submit" id="key-save-btn" style="width:100%">Guardar</button>
   </div>
 </div>
 
@@ -281,9 +281,15 @@ const DAYS_LONG = ['Diumenge', 'Dilluns', 'Dimarts', 'Dimecres', 'Dijous', 'Dive
 const MONTHS_CA = ['Gen','Feb','Mar','Abr','Mai','Jun','Jul','Ago','Set','Oct','Nov','Des'];
 const MONTHS_LONG = ['Gener','Febrer','Març','Abril','Maig','Juny','Juliol','Agost','Setembre','Octubre','Novembre','Desembre'];
 
-function hasAuthCookie() {
-  return document.cookie.split(';').some(c => c.trim().startsWith('crosshero_auth='));
+const KEY_STORAGE = 'crosshero_api_key';
+let apiKey = localStorage.getItem(KEY_STORAGE) || '';
+
+function authHeaders(extra) {
+  const h = Object.assign({}, extra || {});
+  if (apiKey) h['X-Api-Key'] = apiKey;
+  return h;
 }
+
 let weekOffset = 0;            // setmanes des de la setmana actual
 let selectedDate = todayISO(); // dia seleccionat al calendari
 let classesByDate = {};        // { 'YYYY-MM-DD': [items] }
@@ -321,31 +327,32 @@ function toast(msg, kind) {
 function showKeyPrompt() { $('key-prompt').classList.add('show'); }
 function hideKeyPrompt() { $('key-prompt').classList.remove('show'); }
 
-async function saveKey() {
-  const v = $('key-input').value.trim();
-  if (!v) return;
-  try {
-    const r = await fetch(`${API_BASE}/auth`, {
-      method: 'POST',
-      headers: { 'X-Api-Key': v },
-      credentials: 'same-origin',
-    });
-    if (!r.ok) { toast('API key incorrecta', 'error'); return; }
-    hideKeyPrompt();
-    loadAll();
-  } catch (e) {
-    toast('Error: ' + e.message, 'error');
-  }
+function saveKey() {
+  const v = ($('key-input').value || '').trim();
+  if (!v) { toast('Falta la API key', 'error'); return; }
+  apiKey = v;
+  try { localStorage.setItem(KEY_STORAGE, v); }
+  catch (e) { toast('No s\'ha pogut guardar al telèfon: ' + e.message, 'error'); return; }
+  hideKeyPrompt();
+  toast('Clau guardada', 'success');
+  loadAll();
 }
 
 async function loadAll() {
+  if (!apiKey) { showKeyPrompt(); return; }
   const program = $('program').value;
   $('day-content').innerHTML = `<div class="class-grid">${'<div class="skeleton"></div>'.repeat(4)}</div>`;
   try {
     const r = await fetch(`${API_BASE}/upcoming?program=${encodeURIComponent(program)}&days=14&skip_booked=false`, {
-      credentials: 'same-origin',
+      headers: authHeaders(),
     });
-    if (r.status === 401) { showKeyPrompt(); return; }
+    if (r.status === 401) {
+      localStorage.removeItem(KEY_STORAGE);
+      apiKey = '';
+      toast('API key invàlida', 'error');
+      showKeyPrompt();
+      return;
+    }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     classesByDate = {};
@@ -449,8 +456,7 @@ async function submit() {
   try {
     const r = await fetch(`${API_BASE}/schedule`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ items }),
     });
     const data = await r.json();
@@ -484,7 +490,13 @@ $('week').addEventListener('touchend', e => {
   else if (dx < 0 && weekOffset < 1) { weekOffset++; renderWeek(); }
 });
 
-if (!hasAuthCookie()) showKeyPrompt(); else loadAll();
+// Bind save button (added id="key-save-btn" — onclick attribute may not run in some contexts)
+const _btn = $('key-save-btn');
+if (_btn) _btn.addEventListener('click', saveKey);
+const _inp = $('key-input');
+if (_inp) _inp.addEventListener('keydown', e => { if (e.key === 'Enter') saveKey(); });
+
+if (!apiKey) showKeyPrompt(); else loadAll();
 </script>
 </body>
 </html>
