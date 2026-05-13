@@ -276,13 +276,14 @@
 
 <script>
 const API_BASE = window.location.origin;
-const KEY_STORAGE = 'crosshero_api_key';
 const DAYS_CA = ['Dg', 'Dl', 'Dm', 'Dc', 'Dj', 'Dv', 'Ds']; // Date.getDay(): 0=Dg
 const DAYS_LONG = ['Diumenge', 'Dilluns', 'Dimarts', 'Dimecres', 'Dijous', 'Divendres', 'Dissabte'];
 const MONTHS_CA = ['Gen','Feb','Mar','Abr','Mai','Jun','Jul','Ago','Set','Oct','Nov','Des'];
 const MONTHS_LONG = ['Gener','Febrer','Març','Abril','Maig','Juny','Juliol','Agost','Setembre','Octubre','Novembre','Desembre'];
 
-let apiKey = localStorage.getItem(KEY_STORAGE) || '';
+function hasAuthCookie() {
+  return document.cookie.split(';').some(c => c.trim().startsWith('crosshero_auth='));
+}
 let weekOffset = 0;            // setmanes des de la setmana actual
 let selectedDate = todayISO(); // dia seleccionat al calendari
 let classesByDate = {};        // { 'YYYY-MM-DD': [items] }
@@ -320,27 +321,31 @@ function toast(msg, kind) {
 function showKeyPrompt() { $('key-prompt').classList.add('show'); }
 function hideKeyPrompt() { $('key-prompt').classList.remove('show'); }
 
-function saveKey() {
+async function saveKey() {
   const v = $('key-input').value.trim();
   if (!v) return;
-  apiKey = v;
-  localStorage.setItem(KEY_STORAGE, v);
-  hideKeyPrompt();
-  loadAll();
+  try {
+    const r = await fetch(`${API_BASE}/auth`, {
+      method: 'POST',
+      headers: { 'X-Api-Key': v },
+      credentials: 'same-origin',
+    });
+    if (!r.ok) { toast('API key incorrecta', 'error'); return; }
+    hideKeyPrompt();
+    loadAll();
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
 }
 
 async function loadAll() {
-  if (!apiKey) { showKeyPrompt(); return; }
   const program = $('program').value;
   $('day-content').innerHTML = `<div class="class-grid">${'<div class="skeleton"></div>'.repeat(4)}</div>`;
   try {
     const r = await fetch(`${API_BASE}/upcoming?program=${encodeURIComponent(program)}&days=14&skip_booked=false`, {
-      headers: { 'X-Api-Key': apiKey },
+      credentials: 'same-origin',
     });
-    if (r.status === 401) {
-      localStorage.removeItem(KEY_STORAGE);
-      apiKey = ''; showKeyPrompt(); return;
-    }
+    if (r.status === 401) { showKeyPrompt(); return; }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
     classesByDate = {};
@@ -444,7 +449,8 @@ async function submit() {
   try {
     const r = await fetch(`${API_BASE}/schedule`, {
       method: 'POST',
-      headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ items }),
     });
     const data = await r.json();
@@ -478,7 +484,7 @@ $('week').addEventListener('touchend', e => {
   else if (dx < 0 && weekOffset < 1) { weekOffset++; renderWeek(); }
 });
 
-if (!apiKey) showKeyPrompt(); else loadAll();
+if (!hasAuthCookie()) showKeyPrompt(); else loadAll();
 </script>
 </body>
 </html>

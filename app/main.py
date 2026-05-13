@@ -15,8 +15,8 @@ from pathlib import Path  # noqa
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException, Header, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException, Header, Depends, Request, Cookie, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -54,9 +54,43 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Crosshero Bot", lifespan=lifespan)
 
 
-def require_api_key(x_api_key: Optional[str] = Header(default=None)):
-    if config.API_KEY and x_api_key != config.API_KEY:
+AUTH_COOKIE = "crosshero_auth"
+
+
+def require_api_key(
+    x_api_key: Optional[str] = Header(default=None),
+    crosshero_auth: Optional[str] = Cookie(default=None),
+):
+    if not config.API_KEY:
+        return
+    if x_api_key == config.API_KEY or crosshero_auth == config.API_KEY:
+        return
+    raise HTTPException(401, "Invalid API key")
+
+
+@app.post("/auth")
+def auth(response: Response, x_api_key: Optional[str] = Header(default=None)):
+    """Estableix la cookie d'autenticació si l'API key és correcta."""
+    if not config.API_KEY:
+        return {"ok": True, "note": "no API_KEY configurada"}
+    if x_api_key != config.API_KEY:
         raise HTTPException(401, "Invalid API key")
+    response.set_cookie(
+        key=AUTH_COOKIE,
+        value=config.API_KEY,
+        max_age=60 * 60 * 24 * 365,  # 1 any
+        secure=True,
+        httponly=False,  # JS pot llegir-la per detectar estat (no és secret pel client)
+        samesite="lax",
+        path="/",
+    )
+    return {"ok": True}
+
+
+@app.post("/logout")
+def logout(response: Response):
+    response.delete_cookie(AUTH_COOKIE, path="/")
+    return {"ok": True}
 
 
 # ---------- Schemas ----------
