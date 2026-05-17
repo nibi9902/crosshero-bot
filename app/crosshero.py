@@ -6,6 +6,7 @@ i fa peticions HTTP directes contra els formularis de Rails.
 """
 import json
 import re
+import time
 from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
@@ -196,12 +197,21 @@ class CrossheroClient:
         all_items.sort(key=lambda x: (x["date"], x["time"]))
         return {"ok": True, "count": len(all_items), "reservations": all_items}
 
-    def reserve_class(self, class_id: str, csrf_token: Optional[str] = None) -> dict:
+    def reserve_class(
+        self,
+        class_id: str,
+        csrf_token: Optional[str] = None,
+        max_attempts: int = 4,
+        retry_delay: float = 0.5,
+    ) -> dict:
         """
         Reserva una classe pel seu ID. Si no es passa csrf_token, en demana un nou.
+
+        Reintenta automàticament si Crosshero respon que la finestra de reserva
+        encara no s'ha obert ("empiezan N días antes"), per cobrir el cas que
+        el dispar arribi un instant abans del segon exacte d'obertura.
         """
         if not csrf_token:
-            # Necessitem un token fresc — anem al dashboard
             r = self.client.get("/dashboard")
             soup = BeautifulSoup(r.text, "html.parser")
             token = soup.select_one("meta[name='csrf-token']") or soup.select_one("input[name='authenticity_token']")
@@ -209,37 +219,45 @@ class CrossheroClient:
                 return {"ok": False, "error": "No s'ha pogut obtenir CSRF token"}
             csrf_token = token.get("content") or token.get("value")
 
-        r = self.client.post(
-            "/dashboard/class_reservations",
-            data={
-                "authenticity_token": csrf_token,
-                "redirect_to": "",
-                "fullscreen": "",
-                "class_reservation[single_class_id]": class_id,
-            },
-            headers={"Referer": f"{BASE_URL}/dashboard/classes"},
-        )
+        last_result: dict = {}
+        for attempt in range(1, max_attempts + 1):
+            r = self.client.post(
+                "/dashboard/class_reservations",
+                data={
+                    "authenticity_token": csrf_token,
+                    "redirect_to": "",
+                    "fullscreen": "",
+                    "class_reservation[single_class_id]": class_id,
+                },
+                headers={"Referer": f"{BASE_URL}/dashboard/classes"},
+            )
 
-        success = r.status_code in (200, 302) and "sign_in" not in str(r.url)
-        result = {
-            "ok": success,
-            "status": r.status_code,
-            "final_url": str(r.url),
-            "class_id": class_id,
-        }
+            success = r.status_code in (200, 302) and "sign_in" not in str(r.url)
+            result = {
+                "ok": success,
+                "status": r.status_code,
+                "final_url": str(r.url),
+                "class_id": class_id,
+                "attempts": attempt,
+            }
 
-        # Buscar missatges flash a la resposta
-        soup = BeautifulSoup(r.text, "html.parser")
-        flash = soup.select(".alert, .flash, .notification")
-        if flash:
-            result["messages"] = [f.get_text(strip=True)[:200] for f in flash][:3]
+            soup = BeautifulSoup(r.text, "html.parser")
+            flash = soup.select(".alert, .flash, .notification")
+            if flash:
+                result["messages"] = [f.get_text(strip=True)[:200] for f in flash][:3]
 
-        # Detectar errors comuns al HTML
-        if "no se ha podido" in r.text.lower() or "error" in r.text.lower()[:5000]:
-            # Comprovació superficial, no concloent
-            pass
+            messages = result.get("messages", [])
+            too_early = any(
+                "empiezan" in m.lower() and "antes" in m.lower()
+                for m in messages
+            )
 
-        return result
+            last_result = result
+            if not too_early or attempt == max_attempts:
+                return result
+            time.sleep(retry_delay)
+
+        return last_result
 
 
 if __name__ == "__main__":

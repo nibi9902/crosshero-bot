@@ -13,9 +13,11 @@ JOBS_DB = DATA_DIR / "jobs.sqlite"
 # Hores abans que obre la reserva (3 dies al box del usuari)
 RESERVATION_LEAD_DAYS = int(os.getenv("RESERVATION_LEAD_DAYS", "3"))
 
-# Marge de seguretat: disparem aquest nombre de segons abans de l'hora d'obertura
-# (per estar primer a la cua; el servidor de Crosshero pot tenir lleugera deriva)
-FIRE_OFFSET_SECONDS = int(os.getenv("FIRE_OFFSET_SECONDS", "2"))
+# Retard: disparem aquest nombre de segons DESPRÉS de l'hora d'obertura.
+# Crosshero rebutja peticions arribades abans del segon exacte d'obertura
+# ("Las reservas para esta clase empiezan 3 días antes de empezar la clase"),
+# així que cal disparar com a mínim 1s després per cobrir el jitter d'APScheduler.
+FIRE_DELAY_SECONDS = int(os.getenv("FIRE_DELAY_SECONDS", "1"))
 
 # Auth simple per l'API: header X-Api-Key
 API_KEY = os.getenv("API_KEY", "")

@@ -91,7 +91,7 @@ def _schedule_one(client: CrossheroClient, program: str, the_date: date, the_tim
         hour=h, minute=m, tzinfo=tz
     )
     fire_at = class_dt - timedelta(days=config.RESERVATION_LEAD_DAYS) \
-                      - timedelta(seconds=config.FIRE_OFFSET_SECONDS)
+                      + timedelta(seconds=config.FIRE_DELAY_SECONDS)
     now = datetime.now(tz)
     if fire_at <= now:
         fire_at = now + timedelta(seconds=2)
@@ -428,7 +428,7 @@ def schedule(req: ScheduleRequest, _: None = Depends(require_api_key)):
                 hour=h, minute=m, tzinfo=tz
             )
             fire_at = class_dt - timedelta(days=config.RESERVATION_LEAD_DAYS) \
-                              - timedelta(seconds=config.FIRE_OFFSET_SECONDS)
+                              + timedelta(seconds=config.FIRE_DELAY_SECONDS)
 
             now = datetime.now(tz)
             if fire_at <= now:
