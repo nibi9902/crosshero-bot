@@ -23,9 +23,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from .crosshero import CrossheroClient, PROGRAMS
-from . import config, preferences
+from . import config, preferences, watch
 
 
 scheduler = BackgroundScheduler(
@@ -47,6 +48,59 @@ def _append_history(entry: dict):
         print(f"[history] error: {e}", flush=True)
 
 
+def _result_messages_text(result: dict) -> str:
+    return " ".join(result.get("messages", [])).lower()
+
+
+def _is_full_class(result: dict) -> bool:
+    text = _result_messages_text(result)
+    return "límite" in text and "alcanz" in text
+
+
+def _is_success(result: dict) -> bool:
+    text = _result_messages_text(result)
+    return "reservada" in text and ("éxito" in text or "exito" in text)
+
+
+def _is_too_late(result: dict) -> bool:
+    text = _result_messages_text(result)
+    return "cierran" in text and "antes de empezar" in text
+
+
+def _parse_label(label: str) -> Optional[tuple[str, str, str]]:
+    """label = 'Programa YYYY-MM-DD HH:MM' → (program, date, time). El programa
+    pot contenir espais."""
+    parts = label.rsplit(" ", 2)
+    if len(parts) != 3:
+        return None
+    program, the_date, the_time = parts
+    if len(the_date) != 10 or len(the_time) != 5:
+        return None
+    return program, the_date, the_time
+
+
+def _auto_watch_if_full(class_id: str, label: str, result: dict) -> None:
+    """Si la reserva ha fallat per estar plena, afegeix la classe a la cua de
+    vigilància perquè el polling busqui cancel·lacions."""
+    if not _is_full_class(result):
+        return
+    parsed = _parse_label(label)
+    if not parsed:
+        return
+    program, the_date, the_time = parsed
+    try:
+        h, m = map(int, the_time.split(":"))
+        class_dt = datetime.combine(
+            datetime.strptime(the_date, "%Y-%m-%d").date(),
+            datetime.min.time(),
+        ).replace(hour=h, minute=m, tzinfo=ZoneInfo(config.TIMEZONE))
+    except Exception:
+        return
+    added = watch.add(class_id, program, the_date, the_time, class_dt, auto=True)
+    if added:
+        print(f"[auto-watch] afegit {label} (until {added['until']})", flush=True)
+
+
 def reserve_job(class_id: str, label: str):
     """Funció que executa APScheduler a l'hora exacta."""
     started_at = datetime.now(ZoneInfo(config.TIMEZONE)).isoformat()
@@ -60,6 +114,7 @@ def reserve_job(class_id: str, label: str):
             "class_id": class_id,
             "result": result,
         })
+        _auto_watch_if_full(class_id, label, result)
         return result
     except Exception as e:
         err = {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -73,6 +128,92 @@ def reserve_job(class_id: str, label: str):
         return err
     finally:
         client.close()
+
+
+def watch_polling_job():
+    """
+    Cada N segons: revisa la llista de classes a vigilar i intenta reservar-les.
+    - Si ho aconsegueix → la treu de la llista.
+    - Si "cierran 1 minuto antes" → massa tard, la treu.
+    - Si "alcanzó el límite" → continua plena, la deixa per al pròxim cicle.
+    - Si passa el deadline (until) → la treu per silenci.
+    """
+    items = watch.load()
+    if not items:
+        return
+
+    tz = ZoneInfo(config.TIMEZONE)
+    now = datetime.now(tz)
+    remaining: list[dict] = []
+    client: Optional[CrossheroClient] = None
+
+    try:
+        for it in items:
+            try:
+                until = datetime.fromisoformat(it["until"])
+            except Exception:
+                until = now  # malformat → eliminem
+
+            if now >= until:
+                _append_history({
+                    "ts": now.isoformat(),
+                    "label": "WATCH_EXPIRED",
+                    "watch_label": it.get("label"),
+                    "class_id": it.get("class_id"),
+                })
+                continue
+
+            if client is None:
+                client = CrossheroClient(config.STORAGE_STATE)
+
+            try:
+                result = client.reserve_class(it["class_id"])
+            except Exception as e:
+                _append_history({
+                    "ts": now.isoformat(),
+                    "label": "WATCH_ERROR",
+                    "watch_label": it.get("label"),
+                    "class_id": it.get("class_id"),
+                    "error": f"{type(e).__name__}: {e}",
+                })
+                remaining.append(it)
+                continue
+
+            if _is_success(result):
+                _append_history({
+                    "ts": now.isoformat(),
+                    "label": "WATCH_HIT",
+                    "watch_label": it.get("label"),
+                    "class_id": it.get("class_id"),
+                    "result": result,
+                })
+                # No la mantenim — ja és nostra
+            elif _is_too_late(result):
+                _append_history({
+                    "ts": now.isoformat(),
+                    "label": "WATCH_TOO_LATE",
+                    "watch_label": it.get("label"),
+                    "class_id": it.get("class_id"),
+                })
+            elif _is_full_class(result):
+                # Continua plena — mantenir per al pròxim cicle
+                remaining.append(it)
+            else:
+                # Cas ambigu (incloent "empiezan N días antes" o respostes no
+                # categoritzades). Per seguretat, log + mantenir.
+                _append_history({
+                    "ts": now.isoformat(),
+                    "label": "WATCH_UNKNOWN",
+                    "watch_label": it.get("label"),
+                    "class_id": it.get("class_id"),
+                    "result": result,
+                })
+                remaining.append(it)
+    finally:
+        if client:
+            client.close()
+
+    watch.save(remaining)
 
 
 def _schedule_one(client: CrossheroClient, program: str, the_date: date, the_time: str) -> dict:
@@ -166,6 +307,19 @@ async def lifespan(app: FastAPI):
         trigger=CronTrigger(hour=3, minute=0, timezone=config.TIMEZONE),
         id="__auto_schedule_daily",
         replace_existing=True,
+    )
+    # Polling de classes a vigilar (busca cancel·lacions a classes plenes).
+    # No fa cap crida HTTP si la llista watch.json és buida.
+    scheduler.add_job(
+        watch_polling_job,
+        trigger=IntervalTrigger(
+            seconds=config.WATCH_POLL_SECONDS,
+            jitter=min(15, config.WATCH_POLL_SECONDS // 4),
+        ),
+        id="__watch_polling",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
     # I executar-lo també a l'arrencada (per omplir la cua immediatament)
     try:
@@ -321,6 +475,72 @@ def run_auto_schedule(_: None = Depends(require_api_key)):
     """Força una execució del cron d'auto-reserva ara mateix."""
     auto_schedule_job()
     return {"ok": True}
+
+
+class WatchAddRequest(BaseModel):
+    program: str = Field(..., examples=["Hyrox"])
+    class_date: date = Field(..., alias="date")
+    class_time: str = Field(..., alias="time", examples=["07:00"])
+
+    model_config = {"populate_by_name": True}
+
+
+@app.get("/watch")
+def list_watch(_: None = Depends(require_api_key)):
+    """Llista classes actualment a la cua de vigilància."""
+    return {
+        "items": watch.load(),
+        "poll_seconds": config.WATCH_POLL_SECONDS,
+        "deadline_hours": config.WATCH_DEADLINE_HOURS,
+    }
+
+
+@app.post("/watch")
+def add_watch(req: WatchAddRequest, _: None = Depends(require_api_key)):
+    """
+    Afegeix una classe a la cua de vigilància. Resol class_id consultant
+    Crosshero pel dia/hora indicats.
+    """
+    tz = ZoneInfo(config.TIMEZONE)
+    client = CrossheroClient(config.STORAGE_STATE)
+    try:
+        lst = client.list_classes(req.program, req.class_date)
+        if not lst.get("ok"):
+            raise HTTPException(400, f"No s'han pogut llistar classes: {lst.get('error')}")
+        match = next((c for c in lst["classes"] if c["hora"] == req.class_time), None)
+        if not match:
+            raise HTTPException(
+                404,
+                f"No hi ha classe {req.program} a les {req.class_time} el {req.class_date}",
+            )
+    finally:
+        client.close()
+
+    h, m = map(int, req.class_time.split(":"))
+    class_dt = datetime.combine(req.class_date, datetime.min.time()).replace(
+        hour=h, minute=m, tzinfo=tz,
+    )
+    if class_dt <= datetime.now(tz):
+        raise HTTPException(400, "La classe ja ha passat")
+
+    item = watch.add(
+        match["id"],
+        req.program,
+        str(req.class_date),
+        req.class_time,
+        class_dt,
+        auto=False,
+    )
+    if item is None:
+        return {"ok": True, "already_watching": True, "class_id": match["id"]}
+    return {"ok": True, "item": item}
+
+
+@app.delete("/watch/{class_id}")
+def delete_watch(class_id: str, _: None = Depends(require_api_key)):
+    if watch.remove(class_id):
+        return {"ok": True, "removed": class_id}
+    raise HTTPException(404, "No estava a la llista de vigilància")
 
 
 DAYS_CA = ["Dl", "Dm", "Dc", "Dj", "Dv", "Ds", "Dg"]

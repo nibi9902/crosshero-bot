@@ -19,6 +19,12 @@ RESERVATION_LEAD_DAYS = int(os.getenv("RESERVATION_LEAD_DAYS", "3"))
 # així que cal disparar com a mínim 1s després per cobrir el jitter d'APScheduler.
 FIRE_DELAY_SECONDS = int(os.getenv("FIRE_DELAY_SECONDS", "1"))
 
+# Vigilància de classes plenes (polling buscant cancel·lacions)
+WATCH_POLL_SECONDS = int(os.getenv("WATCH_POLL_SECONDS", "60"))
+# Deixem de vigilar aquest nombre d'hores abans de la classe (per no fer soroll
+# inútil quan ja és clar que ningú es traurà a última hora).
+WATCH_DEADLINE_HOURS = int(os.getenv("WATCH_DEADLINE_HOURS", "9"))
+
 # Auth simple per l'API: header X-Api-Key
 API_KEY = os.getenv("API_KEY", "")
 
