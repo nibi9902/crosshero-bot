@@ -79,10 +79,26 @@ def _parse_label(label: str) -> Optional[tuple[str, str, str]]:
     return program, the_date, the_time
 
 
-def _auto_watch_if_full(class_id: str, label: str, result: dict) -> None:
-    """Si la reserva ha fallat per estar plena, afegeix la classe a la cua de
-    vigilància perquè el polling busqui cancel·lacions."""
+def _already_reserved(client: CrossheroClient, class_id: str) -> bool:
+    """Comprova si la classe ja és a la llista de reserves confirmades."""
+    try:
+        res = client.my_reservations()
+        if not res.get("ok"):
+            return False
+        return any(r.get("class_id") == class_id for r in res.get("reservations", []))
+    except Exception:
+        return False
+
+
+def _auto_watch_if_full(
+    client: CrossheroClient, class_id: str, label: str, result: dict
+) -> None:
+    """Si la reserva ha fallat per estar plena (i no és nostra), afegeix la
+    classe a la cua de vigilància perquè el polling busqui cancel·lacions."""
     if not _is_full_class(result):
+        return
+    if _already_reserved(client, class_id):
+        print(f"[auto-watch] saltat {label}: ja la teníem reservada", flush=True)
         return
     parsed = _parse_label(label)
     if not parsed:
@@ -114,7 +130,7 @@ def reserve_job(class_id: str, label: str):
             "class_id": class_id,
             "result": result,
         })
-        _auto_watch_if_full(class_id, label, result)
+        _auto_watch_if_full(client, class_id, label, result)
         return result
     except Exception as e:
         err = {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -146,6 +162,7 @@ def watch_polling_job():
     now = datetime.now(tz)
     remaining: list[dict] = []
     client: Optional[CrossheroClient] = None
+    already_reserved_ids: Optional[set[str]] = None
 
     try:
         for it in items:
@@ -165,6 +182,27 @@ def watch_polling_job():
 
             if client is None:
                 client = CrossheroClient(config.STORAGE_STATE)
+
+            # Una sola crida my_reservations() per cicle: si la classe ja és
+            # nostra (ara o per reserva manual fora del bot), la traiem.
+            if already_reserved_ids is None:
+                try:
+                    res = client.my_reservations()
+                    already_reserved_ids = {
+                        r.get("class_id") for r in res.get("reservations", [])
+                        if r.get("class_id")
+                    } if res.get("ok") else set()
+                except Exception:
+                    already_reserved_ids = set()
+
+            if it["class_id"] in already_reserved_ids:
+                _append_history({
+                    "ts": now.isoformat(),
+                    "label": "WATCH_ALREADY_RESERVED",
+                    "watch_label": it.get("label"),
+                    "class_id": it.get("class_id"),
+                })
+                continue
 
             try:
                 result = client.reserve_class(it["class_id"])
@@ -314,7 +352,7 @@ async def lifespan(app: FastAPI):
         watch_polling_job,
         trigger=IntervalTrigger(
             seconds=config.WATCH_POLL_SECONDS,
-            jitter=min(15, config.WATCH_POLL_SECONDS // 4),
+            jitter=config.WATCH_POLL_JITTER,
         ),
         id="__watch_polling",
         replace_existing=True,
