@@ -781,10 +781,17 @@ function renderWatch(items) {
     const dateStr = new Date(it.date + 'T00:00:00').toLocaleDateString('ca-ES',{weekday:'short',day:'numeric',month:'short'});
     const untilStr = it.until ? new Date(it.until).toLocaleString('ca-ES',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '?';
     const tag = it.auto ? ' · auto' : '';
+    const attempts = it.attempts || 0;
+    const lastAt = it.last_attempt_at
+      ? new Date(it.last_attempt_at).toLocaleTimeString('ca-ES',{hour:'2-digit',minute:'2-digit',second:'2-digit'})
+      : 'mai';
+    const statusMap = { full: 'plena', hit: 'reservada!', too_late: 'massa tard', already: 'ja era teva', error: 'error', unknown: '?' };
+    const status = statusMap[it.last_status] || (attempts ? '—' : 'esperant');
     return `<div class="scheduled-row">
       <div class="info">
         <div class="title">${it.program} · ${it.time}</div>
         <div class="when">${dateStr} · para ${untilStr}${tag}</div>
+        <div class="when">${attempts} intents · darrer ${lastAt} (${status})</div>
       </div>
       <button class="del" data-id="${it.class_id}">Aturar</button>
     </div>`;

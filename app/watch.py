@@ -59,6 +59,9 @@ def add(class_id: str, program: str, the_date: str, the_time: str,
         "added_at": _now_iso(),
         "until": until.isoformat(),
         "auto": auto,
+        "attempts": 0,
+        "last_attempt_at": None,
+        "last_status": None,
     }
     items.append(item)
     save(items)

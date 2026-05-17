@@ -204,9 +204,13 @@ def watch_polling_job():
                 })
                 continue
 
+            it["attempts"] = int(it.get("attempts", 0)) + 1
+            it["last_attempt_at"] = now.isoformat()
+
             try:
                 result = client.reserve_class(it["class_id"])
             except Exception as e:
+                it["last_status"] = "error"
                 _append_history({
                     "ts": now.isoformat(),
                     "label": "WATCH_ERROR",
@@ -218,6 +222,7 @@ def watch_polling_job():
                 continue
 
             if _is_success(result):
+                it["last_status"] = "hit"
                 _append_history({
                     "ts": now.isoformat(),
                     "label": "WATCH_HIT",
@@ -227,6 +232,7 @@ def watch_polling_job():
                 })
                 # No la mantenim — ja és nostra
             elif _is_too_late(result):
+                it["last_status"] = "too_late"
                 _append_history({
                     "ts": now.isoformat(),
                     "label": "WATCH_TOO_LATE",
@@ -235,10 +241,12 @@ def watch_polling_job():
                 })
             elif _is_full_class(result):
                 # Continua plena — mantenir per al pròxim cicle
+                it["last_status"] = "full"
                 remaining.append(it)
             else:
                 # Cas ambigu (incloent "empiezan N días antes" o respostes no
                 # categoritzades). Per seguretat, log + mantenir.
+                it["last_status"] = "unknown"
                 _append_history({
                     "ts": now.isoformat(),
                     "label": "WATCH_UNKNOWN",
