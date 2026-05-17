@@ -236,6 +236,16 @@
     border: 0; border-radius: 8px; padding: 8px 12px;
     font-size: 12px; font-weight: 600; cursor: pointer;
   }
+  .watch-add-row {
+    display: flex; gap: 8px; margin-top: 10px;
+  }
+  .watch-add-btn {
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 10px;
+    padding: 0 16px; font-weight: 600; font-size: 13px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .watch-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .tile-time {
     font-size: 22px; font-weight: 700; letter-spacing: -0.01em;
   }
@@ -383,6 +393,13 @@
     <div class="scheduled-list" id="confirmed-list"></div>
     <div class="pref-label" style="padding: 16px 0 6px;">⏳ Programades (esperant disparament)</div>
     <div class="scheduled-list" id="scheduled-list"></div>
+    <div class="pref-label" style="padding: 16px 0 6px;">👀 Vigilant cancel·lacions</div>
+    <div class="pref-help" id="watch-help">Si una classe està plena, polleja cada 40-70s buscant cancel·lacions.</div>
+    <div class="scheduled-list" id="watch-list"></div>
+    <div class="watch-add-row">
+      <select id="watch-add-select" class="program-pill" style="flex:1; padding: 10px 12px; padding-right: 28px;"><option value="">Carregant…</option></select>
+      <button id="watch-add-btn" class="watch-add-btn">+ Vigilar</button>
+    </div>
   </div>
 </main>
 
@@ -731,18 +748,107 @@ $('save-prefs').addEventListener('click', async () => {
   }
 });
 
-// ─── Queue (Pending + Confirmades) ───
+// ─── Queue (Pending + Confirmades + Watch) ───
+let watchedIds = new Set();
+
 async function loadQueue() {
   $('scheduled-list').innerHTML = '<div class="empty" style="padding:20px 0;">Carregant…</div>';
   $('confirmed-list').innerHTML = '<div class="empty" style="padding:20px 0;">Carregant…</div>';
-  // Carreguem en paral·lel
+  $('watch-list').innerHTML = '<div class="empty" style="padding:20px 0;">Carregant…</div>';
   Promise.all([
     fetch(`${API_BASE}/pending`, { headers: authHeaders() }).then(r => r.ok ? r.json() : Promise.reject('HTTP ' + r.status)),
     fetch(`${API_BASE}/reservations`, { headers: authHeaders() }).then(r => r.ok ? r.json() : Promise.reject('HTTP ' + r.status)),
-  ]).then(([pending, reservations]) => {
+    fetch(`${API_BASE}/watch`, { headers: authHeaders() }).then(r => r.ok ? r.json() : Promise.reject('HTTP ' + r.status)),
+  ]).then(([pending, reservations, watchData]) => {
     renderQueue(pending.jobs || []);
     renderConfirmed(reservations.reservations || []);
+    const items = watchData.items || [];
+    watchedIds = new Set(items.map(i => i.class_id));
+    const help = `Polleja cada ${watchData.poll_seconds || 60}s ± jitter. Para automàticament ${watchData.deadline_hours || 9}h abans de la classe.`;
+    $('watch-help').textContent = help;
+    renderWatch(items);
+    populateWatchAddSelect();
   }).catch(e => toast('Error: ' + e, 'error'));
+}
+
+function renderWatch(items) {
+  const list = $('watch-list');
+  if (!items.length) {
+    list.innerHTML = '<div class="empty" style="padding:16px 0;">Cap vigilància activa</div>';
+    return;
+  }
+  list.innerHTML = items.map(it => {
+    const dateStr = new Date(it.date + 'T00:00:00').toLocaleDateString('ca-ES',{weekday:'short',day:'numeric',month:'short'});
+    const untilStr = it.until ? new Date(it.until).toLocaleString('ca-ES',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '?';
+    const tag = it.auto ? ' · auto' : '';
+    return `<div class="scheduled-row">
+      <div class="info">
+        <div class="title">${it.program} · ${it.time}</div>
+        <div class="when">${dateStr} · para ${untilStr}${tag}</div>
+      </div>
+      <button class="del" data-id="${it.class_id}">Aturar</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      if (!confirm("Aturar la vigilància d'aquesta classe?")) return;
+      try {
+        const r = await fetch(`${API_BASE}/watch/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        toast('Vigilància aturada', 'success');
+        loadQueue();
+      } catch (e) { toast('Error: ' + e.message, 'error'); }
+    });
+  });
+}
+
+async function populateWatchAddSelect() {
+  const program = $('program').value;
+  const sel = $('watch-add-select');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Carregant…</option>';
+  try {
+    const r = await fetch(`${API_BASE}/upcoming?program=${encodeURIComponent(program)}&days=14&skip_booked=false`, { headers: authHeaders() });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const opts = (data.items || [])
+      .filter(it => !watchedIds.has(it.class_id))
+      .map(it => `<option value="${it.class_id}" data-date="${it.date}" data-time="${it.time}" data-program="${it.program}">${it.label}</option>`);
+    sel.innerHTML = '<option value="">Tria una classe per vigilar…</option>' + opts.join('');
+  } catch (e) {
+    sel.innerHTML = '<option value="">Error</option>';
+  }
+}
+
+async function addWatchManually() {
+  const sel = $('watch-add-select');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) { toast('Tria una classe', 'error'); return; }
+  const program = opt.dataset.program;
+  const date = opt.dataset.date;
+  const time = opt.dataset.time;
+  const btn = $('watch-add-btn');
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const r = await fetch(`${API_BASE}/watch`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ program, date, time }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || ('HTTP ' + r.status));
+    }
+    toast('👀 Vigilància activada', 'success');
+    loadQueue();
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '+ Vigilar';
+  }
 }
 
 function renderConfirmed(items) {
@@ -811,6 +917,8 @@ $('week').addEventListener('touchend', e => {
 // Bind save button (added id="key-save-btn" — onclick attribute may not run in some contexts)
 const _btn = $('key-save-btn');
 if (_btn) _btn.addEventListener('click', saveKey);
+const _watchAdd = $('watch-add-btn');
+if (_watchAdd) _watchAdd.addEventListener('click', addWatchManually);
 const _inp = $('key-input');
 if (_inp) _inp.addEventListener('keydown', e => { if (e.key === 'Enter') saveKey(); });
 
